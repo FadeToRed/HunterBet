@@ -136,6 +136,7 @@
           var u = us.val();
           if (!u) { err.textContent = "Account non trovato."; return; }
           u.uid = cred.uid;
+          u.admin = (u.admin === true);
           sessione_salva(u);
           avvia_listener_utente(cred.uid);
           render();
@@ -362,7 +363,7 @@
         var d = snap.val();
         if (d && state.utente) {
           state.utente.saldo = d.saldo;
-          state.utente.admin = d.admin || false;
+          state.utente.admin = (d.admin === true);
           sessione_salva(state.utente);
           render_saldo_hdr();
           render_admin_tab_vis();
@@ -713,7 +714,7 @@
     /* ── admin ── */
     function render_admin_tab_vis() {
       var t = document.getElementById("tcb-tab-admin");
-      if (t) t.style["display"] = (state.utente && state.utente.admin) ? "inline-flex" : "none";
+      if (t) t.style["display"] = (state.utente && state.utente.admin === true) ? "inline-flex" : "none";
     }
     function render_admin_panel() {
       var el = document.getElementById("tcb-admin-panel");
