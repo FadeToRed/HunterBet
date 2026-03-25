@@ -220,7 +220,7 @@
           tmp["inn" + "erHTML"] = html;
 
           /* il contenuto del primo post su Forumfree è dentro .postbody */
-          var post = tmp["querySelector"](".postbody") || tmp["querySelector"](".post-body");
+          var post = tmp["querySelector"](".color") || tmp["querySelector"](".color");
           if (!post) {
             err.textContent = "Contenuto del post non trovato. Verifica l'URL.";
             btn.disabled = false;
