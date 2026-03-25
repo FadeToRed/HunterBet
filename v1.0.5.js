@@ -219,10 +219,10 @@
           var tmp = document.createElement("div");
           tmp["inn" + "erHTML"] = html;
 
-          /* il contenuto del primo post su Forumfree è dentro .postbody */
-          var post = tmp["querySelector"](".color") || tmp["querySelector"](".color");
+          /* il contenuto del post su Forumfree è dentro .color */
+          var post = tmp["querySelector"](".color");
           if (!post) {
-            err.textContent = "Contenuto del post non trovato. Verifica l'URL.";
+            err.textContent = "Struttura della scheda non trovata. Verifica l'URL.";
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-search"></i> Carica';
             return;
@@ -559,6 +559,157 @@
       el.innerHTML = html;
     }
 
+    /* ── profilo ── */
+    function render_profilo_panel() {
+      var el = document.getElementById("tcb-profilo-panel");
+      if (!el || !state.utente) return;
+      var avatar_preview = state.utente.avatar
+        ? '<img class="tcb-avatar-preview" id="prof-avatar-preview" src="' + esc(state.utente.avatar) + '" alt="" style="display:block">'
+        : '<img class="tcb-avatar-preview" id="prof-avatar-preview" src="" alt="" style="display:none">';
+      el.innerHTML =
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-id-card"></i> Dati personaggio</div>' +
+          '<div class="tcb-profilo-pg-row">' +
+            (state.utente.avatar ? '<img class="tcb-profilo-avatar" src="' + esc(state.utente.avatar) + '" alt="">' : '<div class="tcb-profilo-avatar-placeholder"><i class="fas fa-user"></i></div>') +
+            '<div>' +
+              '<div class="tcb-profilo-nome">' + esc(state.utente.nome_pg || state.utente.nickname) + '</div>' +
+              '<a class="tcb-profilo-link" href="' + esc(state.utente.url_scheda || "#") + '" target="_blank"><i class="fas fa-external-link-alt"></i> Scheda personaggio</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        /* ── modifica nickname ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-pen"></i> Modifica nickname</div>' +
+          '<input class="tcb-input" id="prof-nick" type="text" placeholder="Nuovo nickname" value="' + esc(state.utente.nickname) + '">' +
+          '<div id="prof-nick-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-nick-btn"><i class="fas fa-save"></i> Salva nickname</button>' +
+          '<div id="prof-nick-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>' +
+        /* ── modifica avatar ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-image"></i> Modifica avatar</div>' +
+          '<div class="tcb-avatar-row">' +
+            '<input class="tcb-input" id="prof-avatar" type="text" placeholder="URL immagine avatar" value="' + esc(state.utente.avatar || "") + '">' +
+            avatar_preview +
+          '</div>' +
+          '<div id="prof-avatar-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-avatar-btn"><i class="fas fa-save"></i> Salva avatar</button>' +
+          '<div id="prof-avatar-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>' +
+        /* ── modifica password ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-lock"></i> Modifica password</div>' +
+          '<input class="tcb-input" id="prof-pass-old" type="password" placeholder="Password attuale">' +
+          '<input class="tcb-input" id="prof-pass-new" type="password" placeholder="Nuova password (min. 4 caratteri)">' +
+          '<input class="tcb-input" id="prof-pass-new2" type="password" placeholder="Conferma nuova password">' +
+          '<div id="prof-pass-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-pass-btn"><i class="fas fa-save"></i> Salva password</button>' +
+          '<div id="prof-pass-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>';
+
+      /* avatar preview live */
+      document.getElementById("prof-avatar").addEventListener("input", function() {
+        var preview = document.getElementById("prof-avatar-preview");
+        if (!preview) return;
+        var v = this.value.trim();
+        if (v) { preview.src = v; preview.style["display"] = "block"; }
+        else { preview.style["display"] = "none"; preview.src = ""; }
+      });
+
+      /* salva nickname */
+      document.getElementById("prof-nick-btn").addEventListener("click", function() {
+        var nuovo_nick = (document.getElementById("prof-nick").value || "").trim();
+        var err = document.getElementById("prof-nick-err");
+        var ok = document.getElementById("prof-nick-ok");
+        err.textContent = ""; ok.textContent = "";
+        if (!nuovo_nick) { err.textContent = "Inserisci un nickname."; return; }
+        if (nuovo_nick.length < 3) { err.textContent = "Almeno 3 caratteri."; return; }
+        if (nuovo_nick === state.utente.nickname) { err.textContent = "È già il tuo nickname attuale."; return; }
+        var btn = document.getElementById("prof-nick-btn");
+        btn.disabled = true;
+        /* verifica che il nuovo nick non sia già in uso */
+        db.ref("scommesse/credentials/" + nick_key(nuovo_nick)).once("value").then(function(snap) {
+          if (snap.val()) {
+            err.textContent = "Nickname già in uso.";
+            btn.disabled = false;
+            return Promise.reject("dup");
+          }
+          /* crea nuova chiave credentials, cancella vecchia */
+          var uid = state.utente.uid;
+          var old_key = nick_key(state.utente.nickname);
+          var new_key = nick_key(nuovo_nick);
+          return db.ref("scommesse/credentials/" + old_key).once("value").then(function(snap2) {
+            var cred = snap2.val();
+            return Promise.all([
+              db.ref("scommesse/credentials/" + new_key).set(cred),
+              db.ref("scommesse/credentials/" + old_key).remove(),
+              db.ref("scommesse/utenti/" + uid + "/nickname").set(nuovo_nick)
+            ]);
+          });
+        }).then(function() {
+          state.utente.nickname = nuovo_nick;
+          sessione_salva(state.utente);
+          render_header();
+          ok.textContent = "Nickname aggiornato.";
+          btn.disabled = false;
+        }).catch(function(e) {
+          if (e !== "dup") { err.textContent = "Errore. Riprova."; btn.disabled = false; }
+        });
+      });
+
+      /* salva avatar */
+      document.getElementById("prof-avatar-btn").addEventListener("click", function() {
+        var nuovo_avatar = (document.getElementById("prof-avatar").value || "").trim();
+        var err = document.getElementById("prof-avatar-err");
+        var ok = document.getElementById("prof-avatar-ok");
+        err.textContent = ""; ok.textContent = "";
+        var btn = document.getElementById("prof-avatar-btn");
+        btn.disabled = true;
+        db.ref("scommesse/utenti/" + state.utente.uid + "/avatar").set(nuovo_avatar || null)
+          .then(function() {
+            state.utente.avatar = nuovo_avatar || null;
+            sessione_salva(state.utente);
+            render_header();
+            ok.textContent = "Avatar aggiornato.";
+            btn.disabled = false;
+          }).catch(function() { err.textContent = "Errore. Riprova."; btn.disabled = false; });
+      });
+
+      /* salva password */
+      document.getElementById("prof-pass-btn").addEventListener("click", function() {
+        var old_pass = (document.getElementById("prof-pass-old").value || "").trim();
+        var new_pass = (document.getElementById("prof-pass-new").value || "").trim();
+        var new_pass2 = (document.getElementById("prof-pass-new2").value || "").trim();
+        var err = document.getElementById("prof-pass-err");
+        var ok = document.getElementById("prof-pass-ok");
+        err.textContent = ""; ok.textContent = "";
+        if (!old_pass) { err.textContent = "Inserisci la password attuale."; return; }
+        if (!new_pass) { err.textContent = "Inserisci la nuova password."; return; }
+        if (new_pass.length < 4) { err.textContent = "Almeno 4 caratteri."; return; }
+        if (new_pass !== new_pass2) { err.textContent = "Le password non coincidono."; return; }
+        var btn = document.getElementById("prof-pass-btn");
+        btn.disabled = true;
+        var cred_key = nick_key(state.utente.nickname);
+        db.ref("scommesse/credentials/" + cred_key).once("value").then(function(snap) {
+          var cred = snap.val();
+          if (!cred || cred.password !== old_pass) {
+            err.textContent = "Password attuale errata.";
+            btn.disabled = false;
+            return Promise.reject("wrong_pass");
+          }
+          return db.ref("scommesse/credentials/" + cred_key + "/password").set(new_pass);
+        }).then(function() {
+          ok.textContent = "Password aggiornata.";
+          document.getElementById("prof-pass-old").value = "";
+          document.getElementById("prof-pass-new").value = "";
+          document.getElementById("prof-pass-new2").value = "";
+          btn.disabled = false;
+        }).catch(function(e) {
+          if (e !== "wrong_pass") { err.textContent = "Errore. Riprova."; btn.disabled = false; }
+        });
+      });
+    }
+
     /* ── admin ── */
     function render_admin_tab_vis() {
       var t = document.getElementById("tcb-tab-admin");
@@ -747,6 +898,7 @@
             if (p) {
               p.style["display"] = "block";
               if (tab.getAttribute("data-tab")==="admin") render_admin_panel();
+              if (tab.getAttribute("data-tab")==="profilo") render_profilo_panel();
             }
           };
         })(tabs[i]));
