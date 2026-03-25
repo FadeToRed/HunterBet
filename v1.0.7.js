@@ -714,7 +714,10 @@
     /* ── admin ── */
     function render_admin_tab_vis() {
       var t = document.getElementById("tcb-tab-admin");
-      if (t) t.style["display"] = (state.utente && state.utente.admin === true) ? "inline-flex" : "none";
+      if (t) {
+        if (state.utente && state.utente.admin === true) { t.classList.remove("tcb-tab-hidden"); }
+        else { t.classList.add("tcb-tab-hidden"); }
+      }
     }
     function render_admin_panel() {
       var el = document.getElementById("tcb-admin-panel");
