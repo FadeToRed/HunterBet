@@ -213,59 +213,95 @@
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
 
-      var proxy_url = "https://api.allorigins.win/get?url=" + encodeURIComponent(url_raw);
+      /* tenta prima corsproxy.io (testo diretto), poi allorigins come fallback */
+      function parse_html(html_text) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(html_text, "text/html");
 
-      fetch(proxy_url)
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (!data || !data.contents) {
-            err.textContent = "Impossibile leggere la scheda. Verifica che l'URL sia pubblico.";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-            return;
-          }
-          var parser = new DOMParser();
-          var doc = parser.parseFromString(data.contents, "text/html");
-
-          var color_el = doc.querySelector(".color");
-          if (!color_el) {
-            err.textContent = "Nessun post trovato. Controlla che l'URL punti direttamente al topic della scheda.";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-            return;
-          }
-
-          var nome_el = color_el.querySelector(".nomecognome");
-          var nome_pg = nome_el ? nome_el.textContent.trim() : "";
-          if (!nome_pg) {
-            err.textContent = "Nome del personaggio non trovato. Assicurati che la scheda sia valida.";
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-            return;
-          }
-
-          var saldo_jenny = 0;
-          var label_els = color_el.querySelectorAll(".scheda-label");
-          for (var i=0; i<label_els.length; i++) {
-            if (label_els[i].textContent.trim() === "Soldi:") {
-              var next_el = label_els[i].nextElementSibling;
-              if (next_el && next_el.classList.contains("scheda-entry")) {
-                var testo_soldi = next_el.textContent.trim();
-                var parte_jenny = testo_soldi.split("/")[0].trim();
-                parte_jenny = parte_jenny.replace(new RegExp("[^0-9]","g"), "");
-                saldo_jenny = parseInt(parte_jenny, 10) || 0;
-              }
-              break;
-            }
-          }
-
-          set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
-          btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
-        })
-        .catch(function() {
-          err.textContent = "Errore di rete. Riprova tra qualche secondo.";
+        /* cerca il primo div.color (primo post del topic su Forumfree) */
+        var color_el = doc.querySelector(".color");
+        if (!color_el) {
+          /* alcuni skin wrappano dentro .postcolor o .post-color — proviamo anche quelli */
+          color_el = doc.querySelector(".postcolor, .post-color, .postbody");
+        }
+        if (!color_el) {
+          err.textContent = "Nessun post trovato. Controlla che l'URL punti al topic della scheda.";
           btn.disabled = false;
           btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+          return;
+        }
+
+        /* nome: <span class="nomecognome"> */
+        var nome_el = color_el.querySelector(".nomecognome");
+        var nome_pg = nome_el ? nome_el.textContent.trim() : "";
+        if (!nome_pg) {
+          err.textContent = "Elemento .nomecognome non trovato nella scheda. Verifica che la scheda sia valida.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+          return;
+        }
+
+        /* saldo Jenny: span.scheda-label "Soldi:" → nextElementSibling.scheda-entry */
+        var saldo_jenny = 0;
+        var label_els = color_el.querySelectorAll(".scheda-label");
+        for (var i = 0; i < label_els.length; i++) {
+          var lbl_txt = label_els[i].textContent.trim();
+          if (lbl_txt === "Soldi:" || lbl_txt === "Soldi") {
+            var entry_el = label_els[i].nextElementSibling;
+            /* a volte il sibling è un text node, salta finché non trova un element */
+            if (!entry_el) {
+              var nxt = label_els[i].nextSibling;
+              while (nxt && nxt.nodeType !== 1) nxt = nxt.nextSibling;
+              entry_el = nxt;
+            }
+            if (entry_el) {
+              var testo_soldi = entry_el.textContent.trim();
+              /* formato: "100000 Jenny / 42 HC" — prendi solo la parte prima di "/" */
+              var parte_jenny = testo_soldi.split("/")[0].trim();
+              /* rimuovi tutto tranne le cifre */
+              parte_jenny = parte_jenny.replace(new RegExp("[^0-9]", "g"), "");
+              saldo_jenny = parseInt(parte_jenny, 10) || 0;
+            }
+            break;
+          }
+        }
+
+        set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
+        btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
+      }
+
+      function prova_allorigins() {
+        var proxy2 = "https://api.allorigins.win/get?charset=UTF-8&url=" + encodeURIComponent(url_raw);
+        fetch(proxy2)
+          .then(function(res) {
+            if (!res.ok) throw new Error("allorigins " + res.status);
+            return res.json();
+          })
+          .then(function(data) {
+            if (!data || !data.contents) throw new Error("allorigins vuoto");
+            parse_html(data.contents);
+          })
+          .catch(function() {
+            err.textContent = "Impossibile caricare la scheda. Verifica che l'URL sia corretto e pubblico.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+          });
+      }
+
+      /* primo tentativo: corsproxy.io — risposta HTML diretta, più affidabile */
+      var proxy1 = "https://corsproxy.io/?url=" + encodeURIComponent(url_raw);
+      fetch(proxy1)
+        .then(function(res) {
+          if (!res.ok) throw new Error("corsproxy " + res.status);
+          return res.text();
+        })
+        .then(function(html_text) {
+          if (!html_text || html_text.length < 200) throw new Error("risposta vuota");
+          parse_html(html_text);
+        })
+        .catch(function() {
+          /* fallback su allorigins */
+          prova_allorigins();
         });
     }
 
