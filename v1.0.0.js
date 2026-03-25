@@ -1,0 +1,563 @@
+/* =========================================================
+   TORRE CELESTE BETTING — torre-celeste.js
+   Carica via jsDelivr. La config Firebase va nell'HTML
+   come window.BET_FB_CONFIG.
+   ========================================================= */
+(function () {
+  "use strict";
+
+  function init() {
+    if (!window.BET_FB_CONFIG || !window.firebase) { setTimeout(init, 150); return; }
+    try { firebase.app(); } catch (e) { firebase.initializeApp(window.BET_FB_CONFIG); }
+    start(firebase.database());
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else { init(); }
+
+  function start(db) {
+    var state = { utente: null, scontri: {}, scommesse_utente: [] };
+
+    /* ── sessione ── */
+    function sessione_carica() {
+      try { var r = sessionStorage.getItem("tcb_u"); if (r) state.utente = JSON.parse(r); } catch(e){}
+    }
+    function sessione_salva(u) {
+      state.utente = u;
+      try { sessionStorage.setItem("tcb_u", JSON.stringify(u)); } catch(e){}
+    }
+    function sessione_cancella() {
+      state.utente = null;
+      try { sessionStorage.removeItem("tcb_u"); } catch(e){}
+    }
+
+    /* ── utils ── */
+    function esc(s) {
+      return String(s||"")
+        .replace(new RegExp("&","g"),"&amp;")
+        .replace(new RegExp("<","g"),"&lt;")
+        .replace(new RegExp(">","g"),"&gt;")
+        .replace(new RegExp('"',"g"),"&quot;");
+    }
+    function nick_key(n) {
+      var r = "";
+      for (var i=0; i<n.length; i++) {
+        var c = n.charCodeAt(i);
+        if ((c>=65&&c<=90)||(c>=97&&c<=122)||(c>=48&&c<=57)||c===95||c===45) r += n[i];
+        else r += "_";
+      }
+      return r.toLowerCase();
+    }
+    function fmt(n) {
+      if (!n && n!==0) return "0";
+      return String(Math.floor(n)).replace(new RegExp("\\B(?=(\\d{3})+(?!\\d))","g"),".");
+    }
+    function jenny(n) { return fmt(n) + " Jenny"; }
+
+    function toast(msg, tipo) {
+      var t = document.createElement("div");
+      t.className = "tcb-toast" + (tipo==="err" ? " tcb-toast-err" : "");
+      t.innerHTML = '<i class="' + (tipo==="err" ? "fas fa-exclamation-circle" : "fas fa-check-circle") + '"></i> ' + msg;
+      document.body.appendChild(t);
+      t.style["z-index"] = "999999";
+      t.style["position"] = "fixed";
+      setTimeout(function(){ t.classList.add("tcb-toast-out"); }, 2400);
+      setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 2900);
+    }
+    function modal_close() {
+      var o = document.getElementById("tcb-modal-overlay");
+      if (o) o.parentNode.removeChild(o);
+    }
+    function show(id){ var e=document.getElementById(id); if(e) e.style["display"]="block"; }
+    function hide(id){ var e=document.getElementById(id); if(e) e.style["display"]="none"; }
+
+    /* ── render root ── */
+    function render() {
+      render_header();
+      if (!state.utente) { show("tcb-login-wrap"); hide("tcb-main"); }
+      else {
+        hide("tcb-login-wrap"); show("tcb-main");
+        render_saldo_hdr();
+        render_scontri();
+        render_storico();
+        render_admin_tab_vis();
+      }
+    }
+
+    /* ── header ── */
+    function render_header() {
+      var el = document.getElementById("tcb-hdr-user");
+      if (!el) return;
+      if (state.utente) {
+        el.innerHTML =
+          '<div class="tcb-hdr-balance"><i class="fas fa-wallet"></i><span id="tcb-hdr-saldo">' + jenny(state.utente.saldo) + '</span></div>' +
+          '<div class="tcb-hdr-nick"><i class="fas fa-user-circle"></i><span>' + esc(state.utente.nickname) + '</span></div>' +
+          '<button class="tcb-btn tcb-btn-outline tcb-btn-sm" id="tcb-logout-btn"><i class="fas fa-sign-out-alt"></i> Esci</button>';
+        document.getElementById("tcb-logout-btn").addEventListener("click", do_logout);
+      } else {
+        el.innerHTML = '<button class="tcb-btn tcb-btn-primary tcb-btn-sm" id="tcb-hdr-login-btn"><i class="fas fa-sign-in-alt"></i> Accedi</button>';
+        document.getElementById("tcb-hdr-login-btn").addEventListener("click", function(){ show("tcb-login-wrap"); });
+      }
+    }
+    function render_saldo_hdr() {
+      var el = document.getElementById("tcb-hdr-saldo");
+      if (el && state.utente) el.textContent = jenny(state.utente.saldo);
+    }
+
+    /* ── login ── */
+    function init_login() {
+      var btn = document.getElementById("tcb-login-submit");
+      if (btn) btn.addEventListener("click", do_login);
+      var p = document.getElementById("tcb-inp-pass");
+      if (p) p.addEventListener("keydown", function(e){ if(e.key==="Enter") do_login(); });
+    }
+    function do_login() {
+      var nick = (document.getElementById("tcb-inp-nick").value||"").trim();
+      var pass = (document.getElementById("tcb-inp-pass").value||"").trim();
+      var err = document.getElementById("tcb-login-err");
+      err.textContent = "";
+      if (!nick||!pass) { err.textContent = "Inserisci le credenziali."; return; }
+      var btn = document.getElementById("tcb-login-submit");
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Accesso in corso...';
+      db.ref("scommesse/credentials/" + nick_key(nick)).once("value").then(function(snap) {
+        var cred = snap.val();
+        if (!cred || cred.password !== pass) {
+          err.textContent = "Credenziali non valide.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Accedi al conto';
+          return;
+        }
+        return db.ref("scommesse/utenti/" + cred.uid).once("value").then(function(us) {
+          var u = us.val();
+          if (!u) { err.textContent = "Account non trovato."; return; }
+          u.uid = cred.uid;
+          sessione_salva(u);
+          avvia_listener_utente(cred.uid);
+          render();
+        });
+      }).catch(function() {
+        err.textContent = "Errore di connessione. Riprova.";
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Accedi al conto';
+      });
+    }
+    function do_logout() { sessione_cancella(); render(); }
+
+    /* ── listeners ── */
+    function avvia_listeners() {
+      db.ref("scommesse/scontri").on("value", function(snap) {
+        state.scontri = snap.val() || {};
+        if (state.utente) {
+          render_scontri();
+          var adm = document.getElementById("tcb-adm-scontri-list");
+          if (adm && adm.offsetParent !== null) render_admin_scontri_list();
+        }
+      });
+    }
+    function avvia_listener_utente(uid) {
+      db.ref("scommesse/utenti/" + uid).on("value", function(snap) {
+        var d = snap.val();
+        if (d && state.utente) {
+          state.utente.saldo = d.saldo;
+          state.utente.admin = d.admin || false;
+          sessione_salva(state.utente);
+          render_saldo_hdr();
+          render_admin_tab_vis();
+        }
+      });
+      db.ref("scommesse/scommesse").orderByChild("userId").equalTo(uid).on("value", function(snap) {
+        var raw = snap.val() || {};
+        state.scommesse_utente = Object.values(raw).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+        render_storico();
+      });
+    }
+
+    /* ── scontri ── */
+    function render_scontri() {
+      var el = document.getElementById("tcb-scontri-list");
+      if (!el) return;
+      var list = Object.values(state.scontri).filter(function(s){ return s.stato==="aperto"; });
+      if (!list.length) {
+        el.innerHTML =
+          '<div class="tcb-empty-state">' +
+            '<i class="mdi mdi-sword-cross"></i>' +
+            '<p>Nessun incontro disponibile al momento.</p>' +
+            '<span>Controlla di nuovo a breve.</span>' +
+          '</div>';
+        return;
+      }
+      list.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+      var html = "";
+      for (var i=0; i<list.length; i++) html += build_card(list[i]);
+      el.innerHTML = html;
+      var btns = el.querySelectorAll(".tcb-bet-btn");
+      for (var j=0; j<btns.length; j++) btns[j].addEventListener("click", on_bet_click);
+    }
+    function build_card(s) {
+      var parti = "";
+      for (var k=0; k<s.partecipanti.length; k++) {
+        var p = s.partecipanti[k];
+        parti += '<div class="tcb-fighter"><span class="tcb-fighter-name">' + esc(p.nome) + '</span><span class="tcb-odds-pill">' + p.quota + '</span></div>';
+        if (k === 0 && s.partecipanti.length === 2) parti += '<div class="tcb-vs-divider">VS</div>';
+      }
+      return (
+        '<div class="tcb-match-card">' +
+          '<div class="tcb-match-meta">' +
+            '<span class="tcb-match-league"><i class="mdi mdi-sword-cross"></i> Torre Celeste</span>' +
+            '<span class="tcb-live-badge"><i class="fas fa-circle"></i> APERTO</span>' +
+          '</div>' +
+          '<div class="tcb-match-title">' + esc(s.titolo) + '</div>' +
+          '<div class="tcb-fighters-row">' + parti + '</div>' +
+          '<button class="tcb-btn tcb-btn-accent tcb-bet-btn" data-id="' + esc(s.id) + '">' +
+            '<i class="fas fa-plus-circle"></i> Piazza scommessa' +
+          '</button>' +
+        '</div>'
+      );
+    }
+    function on_bet_click(e) {
+      var id = e.currentTarget.getAttribute("data-id");
+      var s = state.scontri[id];
+      if (s) apri_modal(s);
+    }
+
+    /* ── modal scommessa ── */
+    function apri_modal(scontro) {
+      modal_close();
+      var overlay = document.createElement("div");
+      overlay.id = "tcb-modal-overlay";
+      overlay.className = "tcb-modal-overlay";
+      var sel_idx = -1;
+      var radios = "";
+      for (var i=0; i<scontro.partecipanti.length; i++) {
+        var p = scontro.partecipanti[i];
+        radios +=
+          '<div class="tcb-radio-opt" data-idx="' + i + '">' +
+            '<span class="tcb-radio-name">' + esc(p.nome) + '</span>' +
+            '<span class="tcb-radio-odds">' + p.quota + '</span>' +
+          '</div>';
+      }
+      overlay.innerHTML =
+        '<div class="tcb-modal">' +
+          '<div class="tcb-modal-hdr">' +
+            '<span class="tcb-modal-title"><i class="mdi mdi-sword-cross"></i> ' + esc(scontro.titolo) + '</span>' +
+            '<button class="tcb-modal-x" id="tcb-m-x"><i class="fas fa-times"></i></button>' +
+          '</div>' +
+          '<div class="tcb-modal-body">' +
+            '<div class="tcb-form-label">Seleziona combattente</div>' +
+            '<div class="tcb-radio-group">' + radios + '</div>' +
+            '<div class="tcb-form-label">Importo</div>' +
+            '<div class="tcb-amount-wrap">' +
+              '<input class="tcb-input" id="tcb-m-imp" type="number" min="1" placeholder="0">' +
+              '<span class="tcb-amount-sfx">Jenny</span>' +
+            '</div>' +
+            '<div class="tcb-bal-row"><i class="fas fa-wallet"></i> Disponibile: <strong>' + jenny(state.utente.saldo) + '</strong></div>' +
+            '<div id="tcb-m-prev" class="tcb-prev-row"></div>' +
+            '<div id="tcb-m-err" class="tcb-field-err"></div>' +
+          '</div>' +
+          '<div class="tcb-modal-ftr">' +
+            '<button class="tcb-btn tcb-btn-outline" id="tcb-m-cancel">Annulla</button>' +
+            '<button class="tcb-btn tcb-btn-confirm" id="tcb-m-ok"><i class="fas fa-check"></i> Conferma</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+      overlay.style["z-index"] = "99999";
+      overlay.style["position"] = "fixed";
+
+      var opts = overlay.querySelectorAll(".tcb-radio-opt");
+      function aggiorna_prev() {
+        var imp = parseInt(document.getElementById("tcb-m-imp").value, 10);
+        var prev = document.getElementById("tcb-m-prev");
+        if (!prev) return;
+        if (sel_idx >= 0 && imp > 0) {
+          var vincita = Math.floor(imp * scontro.partecipanti[sel_idx].quota);
+          prev.innerHTML = '<i class="fas fa-trophy"></i> Vincita potenziale: <strong>' + jenny(vincita) + '</strong>';
+          prev.style["display"] = "flex";
+        } else { prev.style["display"] = "none"; }
+      }
+      for (var j=0; j<opts.length; j++) {
+        opts[j].addEventListener("click", (function(idx, el_opt) {
+          return function() {
+            for (var x=0; x<opts.length; x++) opts[x].classList.remove("selected");
+            el_opt.classList.add("selected");
+            sel_idx = idx;
+            aggiorna_prev();
+          };
+        })(parseInt(opts[j].getAttribute("data-idx"),10), opts[j]));
+      }
+      document.getElementById("tcb-m-imp").addEventListener("input", aggiorna_prev);
+      document.getElementById("tcb-m-x").addEventListener("click", modal_close);
+      document.getElementById("tcb-m-cancel").addEventListener("click", modal_close);
+      overlay.addEventListener("click", function(e){ if(e.target===overlay) modal_close(); });
+      document.getElementById("tcb-m-ok").addEventListener("click", function(){ do_scommessa(scontro, sel_idx); });
+    }
+
+    function do_scommessa(scontro, sel_idx) {
+      var err = document.getElementById("tcb-m-err");
+      err.textContent = "";
+      if (sel_idx < 0) { err.textContent = "Seleziona un combattente."; return; }
+      var importo = parseInt(document.getElementById("tcb-m-imp").value, 10);
+      if (!importo || importo < 1) { err.textContent = "Inserisci un importo valido."; return; }
+      if (importo > state.utente.saldo) { err.textContent = "Saldo insufficiente."; return; }
+      var btn = document.getElementById("tcb-m-ok");
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+      var part = scontro.partecipanti[sel_idx];
+      var sid = "sc_" + Date.now() + "_" + Math.floor(Math.random()*9999);
+      db.ref("scommesse/utenti/" + state.utente.uid + "/saldo").transaction(function(s) {
+        if ((s||0) < importo) return;
+        return (s||0) - importo;
+      }).then(function(res) {
+        if (!res.committed) {
+          if(document.getElementById("tcb-m-err")) document.getElementById("tcb-m-err").textContent = "Saldo insufficiente.";
+          if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Conferma'; }
+          return;
+        }
+        return db.ref("scommesse/scommesse/" + sid).set({
+          id:sid, userId:state.utente.uid, userNick:state.utente.nickname,
+          scontroId:scontro.id, scontroTitolo:scontro.titolo,
+          partecipante:part.nome, quota:part.quota, importo:importo,
+          stato:"in_attesa", createdAt:Date.now()
+        });
+      }).then(function() {
+        modal_close();
+        toast("Scommessa registrata con successo.", "ok");
+      }).catch(function() {
+        if(document.getElementById("tcb-m-err")) document.getElementById("tcb-m-err").textContent = "Errore. Riprova.";
+        if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Conferma'; }
+      });
+    }
+
+    /* ── storico ── */
+    function render_storico() {
+      var el = document.getElementById("tcb-storico-body");
+      if (!el) return;
+      if (!state.scommesse_utente.length) {
+        el.innerHTML = '<tr><td colspan="6" class="tcb-td-empty">Nessuna scommessa registrata.</td></tr>';
+        return;
+      }
+      var html = "";
+      for (var i=0; i<state.scommesse_utente.length; i++) {
+        var s = state.scommesse_utente[i];
+        var ec = s.stato==="vinta" ? "tcb-esito-win" : s.stato==="persa" ? "tcb-esito-loss" : "tcb-esito-wait";
+        var ei = s.stato==="vinta" ? "fa-check-circle" : s.stato==="persa" ? "fa-times-circle" : "fa-clock";
+        var el_lbl = s.stato==="vinta" ? "Vinta" : s.stato==="persa" ? "Persa" : "In attesa";
+        var pot = jenny(Math.floor(s.importo * s.quota));
+        var pot_html = s.stato==="vinta" ? '<span class="tcb-win-amt">+ ' + pot + '</span>' : pot;
+        html +=
+          '<tr>' +
+            '<td class="tcb-td-match">' + esc(s.scontroTitolo) + '</td>' +
+            '<td>' + esc(s.partecipante) + '</td>' +
+            '<td>' + jenny(s.importo) + '</td>' +
+            '<td><span class="tcb-odds-sm">×' + s.quota + '</span></td>' +
+            '<td>' + pot_html + '</td>' +
+            '<td><span class="tcb-esito ' + ec + '"><i class="fas ' + ei + '"></i> ' + el_lbl + '</span></td>' +
+          '</tr>';
+      }
+      el.innerHTML = html;
+    }
+
+    /* ── admin ── */
+    function render_admin_tab_vis() {
+      var t = document.getElementById("tcb-tab-admin");
+      if (t) t.style["display"] = (state.utente && state.utente.admin) ? "inline-flex" : "none";
+    }
+    function render_admin_panel() {
+      var el = document.getElementById("tcb-admin-panel");
+      if (!el) return;
+      el.innerHTML =
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="mdi mdi-sword-cross"></i> Nuovo incontro</div>' +
+          '<input class="tcb-input" id="adm-titolo" placeholder="Titolo incontro">' +
+          '<div id="adm-parti-wrap">' + adm_row(0) + adm_row(1) + '</div>' +
+          '<button class="tcb-btn tcb-btn-outline tcb-btn-sm" id="adm-add-part"><i class="fas fa-plus"></i> Aggiungi combattente</button>' +
+          '<button class="tcb-btn tcb-btn-primary" id="adm-crea-btn"><i class="fas fa-save"></i> Crea incontro</button>' +
+          '<div id="adm-crea-msg" class="tcb-adm-msg"></div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-list-ul"></i> Incontri in gestione</div>' +
+          '<div id="tcb-adm-scontri-list"></div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-wallet"></i> Modifica saldo utente</div>' +
+          '<input class="tcb-input" id="adm-saldo-nick" placeholder="Nickname utente">' +
+          '<input class="tcb-input" id="adm-saldo-delta" type="number" placeholder="Importo (negativo per sottrarre)">' +
+          '<button class="tcb-btn tcb-btn-primary" id="adm-saldo-btn"><i class="fas fa-exchange-alt"></i> Aggiorna saldo</button>' +
+          '<div id="adm-saldo-msg" class="tcb-adm-msg"></div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-user-plus"></i> Registra nuovo account</div>' +
+          '<input class="tcb-input" id="adm-new-nick" placeholder="Nickname">' +
+          '<input class="tcb-input" id="adm-new-pass" type="password" placeholder="Password">' +
+          '<input class="tcb-input" id="adm-new-saldo" type="number" placeholder="Saldo iniziale (Jenny)">' +
+          '<button class="tcb-btn tcb-btn-primary" id="adm-new-btn"><i class="fas fa-user-check"></i> Crea account</button>' +
+          '<div id="adm-new-msg" class="tcb-adm-msg"></div>' +
+        '</div>';
+      render_admin_scontri_list();
+      document.getElementById("adm-add-part").addEventListener("click", function() {
+        var wrap = document.getElementById("adm-parti-wrap");
+        var cnt = wrap.querySelectorAll(".adm-part-row").length;
+        var d = document.createElement("div"); d.innerHTML = adm_row(cnt);
+        wrap.appendChild(d.firstChild);
+      });
+      document.getElementById("adm-crea-btn").addEventListener("click", do_adm_crea);
+      document.getElementById("adm-saldo-btn").addEventListener("click", do_adm_saldo);
+      document.getElementById("adm-new-btn").addEventListener("click", do_adm_new_user);
+    }
+    function adm_row(idx) {
+      return '<div class="adm-part-row">' +
+        '<input class="tcb-input adm-p-nome" placeholder="Nome combattente ' + (idx+1) + '">' +
+        '<input class="tcb-input adm-p-quota" type="number" step="0.01" min="1.01" placeholder="Quota">' +
+      '</div>';
+    }
+    function render_admin_scontri_list() {
+      var el = document.getElementById("tcb-adm-scontri-list");
+      if (!el) return;
+      var list = Object.values(state.scontri);
+      if (!list.length) { el.innerHTML = '<div class="tcb-adm-empty">Nessun incontro.</div>'; return; }
+      list.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+      var html = "";
+      for (var i=0; i<list.length; i++) {
+        var s = list[i];
+        var bc = s.stato==="aperto" ? "tcb-badge-open" : s.stato==="chiuso" ? "tcb-badge-closed" : "tcb-badge-done";
+        var bl = s.stato==="aperto" ? "Aperto" : s.stato==="chiuso" ? "Chiuso" : "Concluso";
+        var btns = "";
+        if (s.stato==="aperto") btns += '<button class="tcb-btn tcb-btn-outline tcb-btn-xs adm-chiudi" data-id="' + esc(s.id) + '"><i class="fas fa-lock"></i> Chiudi</button>';
+        if (s.stato!=="concluso") {
+          for (var k=0; k<s.partecipanti.length; k++) {
+            btns += '<button class="tcb-btn tcb-btn-win tcb-btn-xs adm-vinci" data-id="' + esc(s.id) + '" data-pidx="' + k + '"><i class="fas fa-trophy"></i> ' + esc(s.partecipanti[k].nome) + '</button>';
+          }
+        }
+        html +=
+          '<div class="tcb-adm-row">' +
+            '<div class="tcb-adm-row-info"><span class="tcb-adm-row-title">' + esc(s.titolo) + '</span><span class="tcb-badge ' + bc + '">' + bl + '</span></div>' +
+            '<div class="tcb-adm-row-btns">' + btns + '</div>' +
+          '</div>';
+      }
+      el.innerHTML = html;
+      var ch = el.querySelectorAll(".adm-chiudi");
+      for (var j=0; j<ch.length; j++) {
+        ch[j].addEventListener("click", function(e) {
+          db.ref("scommesse/scontri/" + e.currentTarget.getAttribute("data-id") + "/stato").set("chiuso");
+        });
+      }
+      var vn = el.querySelectorAll(".adm-vinci");
+      for (var m=0; m<vn.length; m++) {
+        vn[m].addEventListener("click", function(e) {
+          do_adm_vinci(e.currentTarget.getAttribute("data-id"), parseInt(e.currentTarget.getAttribute("data-pidx"),10));
+        });
+      }
+    }
+    function do_adm_crea() {
+      var titolo = (document.getElementById("adm-titolo").value||"").trim();
+      var msg = document.getElementById("adm-crea-msg");
+      msg.textContent = ""; msg.className = "tcb-adm-msg";
+      if (!titolo) { msg.textContent = "Inserisci il titolo."; return; }
+      var rows = document.querySelectorAll(".adm-part-row");
+      var parti = [];
+      for (var i=0; i<rows.length; i++) {
+        var nome = rows[i].querySelector(".adm-p-nome").value.trim();
+        var quota = parseFloat(rows[i].querySelector(".adm-p-quota").value);
+        if (!nome||!quota||quota<1.01) { msg.textContent = "Compila tutti i campi (quota min 1.01)."; return; }
+        parti.push({nome:nome, quota:quota});
+      }
+      if (parti.length<2) { msg.textContent = "Servono almeno 2 combattenti."; return; }
+      var id = "c_" + Date.now();
+      db.ref("scommesse/scontri/" + id).set({id:id, titolo:titolo, partecipanti:parti, stato:"aperto", vincitore:null, createdAt:Date.now()})
+        .then(function() {
+          msg.className = "tcb-adm-msg tcb-adm-ok"; msg.textContent = "Incontro creato.";
+          document.getElementById("adm-titolo").value = "";
+        }).catch(function(){ msg.textContent = "Errore."; });
+    }
+    function do_adm_vinci(sc_id, pidx) {
+      var sc = state.scontri[sc_id];
+      if (!sc) return;
+      var vincitore = sc.partecipanti[pidx];
+      if (!confirm("Dichiari vincitore: " + vincitore.nome + "?\nLe vincite verranno distribuite automaticamente.")) return;
+      db.ref("scommesse/scommesse").orderByChild("scontroId").equalTo(sc_id).once("value").then(function(snap) {
+        var raw = snap.val() || {};
+        var promises = [];
+        var keys = Object.keys(raw);
+        for (var i=0; i<keys.length; i++) {
+          var bet = raw[keys[i]];
+          var esito = bet.partecipante===vincitore.nome ? "vinta" : "persa";
+          promises.push(db.ref("scommesse/scommesse/" + bet.id + "/stato").set(esito));
+          if (esito==="vinta") {
+            var v = Math.floor(bet.importo * bet.quota);
+            (function(uid, vincita) {
+              promises.push(db.ref("scommesse/utenti/"+uid+"/saldo").transaction(function(s){ return (s||0)+vincita; }));
+            })(bet.userId, v);
+          }
+        }
+        promises.push(db.ref("scommesse/scontri/"+sc_id).update({stato:"concluso", vincitore:vincitore.nome}));
+        return Promise.all(promises);
+      }).then(function(){ toast("Incontro concluso. Vincite distribuite.", "ok"); })
+        .catch(function(e){ toast("Errore: " + e.message, "err"); });
+    }
+    function do_adm_saldo() {
+      var nick = (document.getElementById("adm-saldo-nick").value||"").trim();
+      var delta = parseInt(document.getElementById("adm-saldo-delta").value, 10);
+      var msg = document.getElementById("adm-saldo-msg");
+      msg.textContent = ""; msg.className = "tcb-adm-msg";
+      if (!nick) { msg.textContent = "Inserisci nickname."; return; }
+      if (!delta) { msg.textContent = "Inserisci importo."; return; }
+      db.ref("scommesse/credentials/" + nick_key(nick)).once("value").then(function(snap) {
+        var cred = snap.val();
+        if (!cred) { msg.textContent = "Utente non trovato."; return Promise.reject("nf"); }
+        return db.ref("scommesse/utenti/"+cred.uid+"/saldo").transaction(function(s){ var n=(s||0)+delta; return n<0?0:n; });
+      }).then(function(res) {
+        if (res && res.committed) { msg.className="tcb-adm-msg tcb-adm-ok"; msg.textContent="Saldo aggiornato."; }
+      }).catch(function(e){ if(e!=="nf") msg.textContent="Errore."; });
+    }
+    function do_adm_new_user() {
+      var nick = (document.getElementById("adm-new-nick").value||"").trim();
+      var pass = (document.getElementById("adm-new-pass").value||"").trim();
+      var saldo = parseInt(document.getElementById("adm-new-saldo").value, 10) || 0;
+      var msg = document.getElementById("adm-new-msg");
+      msg.textContent = ""; msg.className = "tcb-adm-msg";
+      if (!nick||!pass) { msg.textContent = "Compila tutti i campi."; return; }
+      var uid = "u_" + Date.now() + "_" + Math.floor(Math.random()*9999);
+      db.ref("scommesse/credentials/" + nick_key(nick)).once("value").then(function(snap) {
+        if (snap.val()) { msg.textContent = "Nickname già in uso."; return Promise.reject("dup"); }
+        return Promise.all([
+          db.ref("scommesse/utenti/"+uid).set({uid:uid, nickname:nick, saldo:saldo, admin:false, createdAt:Date.now()}),
+          db.ref("scommesse/credentials/"+nick_key(nick)).set({uid:uid, password:pass})
+        ]);
+      }).then(function() {
+        msg.className="tcb-adm-msg tcb-adm-ok"; msg.textContent="Account creato.";
+        document.getElementById("adm-new-nick").value="";
+        document.getElementById("adm-new-pass").value="";
+        document.getElementById("adm-new-saldo").value="";
+      }).catch(function(e){ if(e!=="dup") msg.textContent="Errore."; });
+    }
+
+    /* ── tabs ── */
+    function init_tabs() {
+      var tabs = document.querySelectorAll("#tcb-wrap .tcb-tab");
+      var panels = document.querySelectorAll("#tcb-wrap .tcb-panel");
+      for (var i=0; i<tabs.length; i++) {
+        tabs[i].addEventListener("click", (function(tab) {
+          return function() {
+            for (var j=0; j<tabs.length; j++) tabs[j].classList.remove("active");
+            for (var k=0; k<panels.length; k++) panels[k].style["display"] = "none";
+            tab.classList.add("active");
+            var p = document.getElementById("tcb-panel-" + tab.getAttribute("data-tab"));
+            if (p) {
+              p.style["display"] = "block";
+              if (tab.getAttribute("data-tab")==="admin") render_admin_panel();
+            }
+          };
+        })(tabs[i]));
+      }
+      if (tabs.length) tabs[0].click();
+    }
+
+    /* ── boot ── */
+    sessione_carica();
+    avvia_listeners();
+    init_login();
+    init_tabs();
+    render();
+    if (state.utente) avvia_listener_utente(state.utente.uid);
+  }
+})();
