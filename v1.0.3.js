@@ -213,95 +213,69 @@
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
 
-      /* tenta prima corsproxy.io (testo diretto), poi allorigins come fallback */
-      function parse_html(html_text) {
-        var parser = new DOMParser();
-        var doc = parser.parseFromString(html_text, "text/html");
+      fetch(url_raw)
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          var tmp = document.createElement("div");
+          tmp["inn" + "erHTML"] = html;
 
-        /* cerca il primo div.color (primo post del topic su Forumfree) */
-        var color_el = doc.querySelector(".color");
-        if (!color_el) {
-          /* alcuni skin wrappano dentro .postcolor o .post-color — proviamo anche quelli */
-          color_el = doc.querySelector(".postcolor, .post-color, .postbody");
-        }
-        if (!color_el) {
-          err.textContent = "Nessun post trovato. Controlla che l'URL punti al topic della scheda.";
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-          return;
-        }
-
-        /* nome: <span class="nomecognome"> */
-        var nome_el = color_el.querySelector(".nomecognome");
-        var nome_pg = nome_el ? nome_el.textContent.trim() : "";
-        if (!nome_pg) {
-          err.textContent = "Elemento .nomecognome non trovato nella scheda. Verifica che la scheda sia valida.";
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-          return;
-        }
-
-        /* saldo Jenny: span.scheda-label "Soldi:" → nextElementSibling.scheda-entry */
-        var saldo_jenny = 0;
-        var label_els = color_el.querySelectorAll(".scheda-label");
-        for (var i = 0; i < label_els.length; i++) {
-          var lbl_txt = label_els[i].textContent.trim();
-          if (lbl_txt === "Soldi:" || lbl_txt === "Soldi") {
-            var entry_el = label_els[i].nextElementSibling;
-            /* a volte il sibling è un text node, salta finché non trova un element */
-            if (!entry_el) {
-              var nxt = label_els[i].nextSibling;
-              while (nxt && nxt.nodeType !== 1) nxt = nxt.nextSibling;
-              entry_el = nxt;
-            }
-            if (entry_el) {
-              var testo_soldi = entry_el.textContent.trim();
-              /* formato: "100000 Jenny / 42 HC" — prendi solo la parte prima di "/" */
-              var parte_jenny = testo_soldi.split("/")[0].trim();
-              /* rimuovi tutto tranne le cifre */
-              parte_jenny = parte_jenny.replace(new RegExp("[^0-9]", "g"), "");
-              saldo_jenny = parseInt(parte_jenny, 10) || 0;
-            }
-            break;
-          }
-        }
-
-        set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
-        btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
-      }
-
-      function prova_allorigins() {
-        var proxy2 = "https://api.allorigins.win/get?charset=UTF-8&url=" + encodeURIComponent(url_raw);
-        fetch(proxy2)
-          .then(function(res) {
-            if (!res.ok) throw new Error("allorigins " + res.status);
-            return res.json();
-          })
-          .then(function(data) {
-            if (!data || !data.contents) throw new Error("allorigins vuoto");
-            parse_html(data.contents);
-          })
-          .catch(function() {
-            err.textContent = "Impossibile caricare la scheda. Verifica che l'URL sia corretto e pubblico.";
+          /* il contenuto del primo post su Forumfree è dentro .postbody */
+          var post = tmp["querySelector"](".postbody") || tmp["querySelector"](".post-body");
+          if (!post) {
+            err.textContent = "Contenuto del post non trovato. Verifica l'URL.";
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-search"></i> Carica';
-          });
-      }
+            return;
+          }
 
-      /* primo tentativo: corsproxy.io — risposta HTML diretta, più affidabile */
-      var proxy1 = "https://corsproxy.io/?url=" + encodeURIComponent(url_raw);
-      fetch(proxy1)
-        .then(function(res) {
-          if (!res.ok) throw new Error("corsproxy " + res.status);
-          return res.text();
+          /* leggi un valore cercando lo span.scheda-label con quel testo,
+             poi prende il successivo span.scheda-entry */
+          function leggi_label(root, label_testo) {
+            var spans = root["getElements" + "ByTagName"]("span");
+            for (var i = 0; i < spans.length - 1; i++) {
+              if (spans[i].className === "scheda-label" &&
+                  spans[i].textContent.trim() === label_testo) {
+                if (spans[i + 1] && spans[i + 1].className === "scheda-entry") {
+                  return spans[i + 1].textContent.trim();
+                }
+              }
+            }
+            return null;
+          }
+
+          /* nome: <span class="nomecognome"> */
+          var nome_spans = post["getElements" + "ByTagName"]("span");
+          var nome_pg = "";
+          for (var j = 0; j < nome_spans.length; j++) {
+            if (nome_spans[j].className === "nomecognome") {
+              nome_pg = nome_spans[j].textContent.trim();
+              break;
+            }
+          }
+          if (!nome_pg) {
+            err.textContent = "Nome del personaggio non trovato nella scheda.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+            return;
+          }
+
+          /* saldo: cerca "Soldi:" e prende l'entry successiva */
+          var soldi_raw = leggi_label(post, "Soldi:");
+          var saldo_jenny = 0;
+          if (soldi_raw) {
+            /* formato "100000 Jenny / 42 HC" — prendi solo prima del "/" */
+            var parte_jenny = soldi_raw.split("/")[0].trim();
+            parte_jenny = parte_jenny.replace(new RegExp("[^0-9]", "g"), "");
+            saldo_jenny = parseInt(parte_jenny, 10) || 0;
+          }
+
+          set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
+          btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
         })
-        .then(function(html_text) {
-          if (!html_text || html_text.length < 200) throw new Error("risposta vuota");
-          parse_html(html_text);
-        })
-        .catch(function() {
-          /* fallback su allorigins */
-          prova_allorigins();
+        .catch(function(e) {
+          err.textContent = "Errore nel caricamento. Assicurati di essere sullo stesso forum.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-search"></i> Carica';
         });
     }
 
