@@ -89,9 +89,13 @@
       var el = document.getElementById("tcb-hdr-user");
       if (!el) return;
       if (state.utente) {
+        var avatar_html = state.utente.avatar
+          ? '<img class="tcb-hdr-avatar" src="' + esc(state.utente.avatar) + '" alt="">'
+          : '<div class="tcb-hdr-avatar tcb-hdr-avatar-placeholder"><i class="fas fa-user"></i></div>';
+        var nome_display = state.utente.nome_pg || state.utente.nickname;
         el.innerHTML =
           '<div class="tcb-hdr-balance"><i class="fas fa-wallet"></i><span id="tcb-hdr-saldo">' + jenny(state.utente.saldo) + '</span></div>' +
-          '<div class="tcb-hdr-nick"><i class="fas fa-user-circle"></i><span>' + esc(state.utente.nickname) + '</span></div>' +
+          '<div class="tcb-hdr-nick">' + avatar_html + '<span>' + esc(nome_display) + '</span></div>' +
           '<button class="tcb-btn tcb-btn-outline tcb-btn-sm" id="tcb-logout-btn"><i class="fas fa-sign-out-alt"></i> Esci</button>';
         document.getElementById("tcb-logout-btn").addEventListener("click", do_logout);
       } else {
@@ -143,6 +147,194 @@
       });
     }
     function do_logout() { sessione_cancella(); render(); }
+
+    /* ── registrazione ── */
+    function init_registrazione() {
+      var btn_mostra = document.getElementById("tcb-show-reg-btn");
+      if (btn_mostra) btn_mostra.addEventListener("click", function() {
+        hide("tcb-login-card");
+        show("tcb-reg-card");
+        reset_reg_form();
+      });
+      var btn_torna = document.getElementById("tcb-reg-back-btn");
+      if (btn_torna) btn_torna.addEventListener("click", function() {
+        hide("tcb-reg-card");
+        show("tcb-login-card");
+      });
+      var btn_fetch = document.getElementById("tcb-reg-fetch-btn");
+      if (btn_fetch) btn_fetch.addEventListener("click", do_fetch_scheda);
+      var btn_submit = document.getElementById("tcb-reg-submit");
+      if (btn_submit) btn_submit.addEventListener("click", do_registrazione);
+      var inp_avatar = document.getElementById("tcb-reg-avatar");
+      if (inp_avatar) inp_avatar.addEventListener("input", function() {
+        var preview = document.getElementById("tcb-reg-avatar-preview");
+        if (!preview) return;
+        var v = this.value.trim();
+        if (v) { preview.src = v; preview.style["display"] = "block"; }
+        else { preview.style["display"] = "none"; preview.src = ""; }
+      });
+    }
+
+    function reset_reg_form() {
+      var ids = ["tcb-reg-url","tcb-reg-nick","tcb-reg-pass","tcb-reg-pass2","tcb-reg-avatar"];
+      for (var i=0; i<ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.value = "";
+      }
+      set_scheda_fields("","",0, false);
+      var err = document.getElementById("tcb-reg-err");
+      if (err) err.textContent = "";
+      var preview = document.getElementById("tcb-reg-avatar-preview");
+      if (preview) { preview.style["display"] = "none"; preview.src = ""; }
+      var fetch_btn = document.getElementById("tcb-reg-fetch-btn");
+      if (fetch_btn) { fetch_btn.disabled = false; fetch_btn.innerHTML = '<i class="fas fa-search"></i> Carica'; }
+    }
+
+    function set_scheda_fields(nome, url_scheda, saldo, visibile) {
+      var el_nome = document.getElementById("tcb-reg-nome-pg");
+      var el_saldo = document.getElementById("tcb-reg-saldo-pg");
+      var el_url_saved = document.getElementById("tcb-reg-url-saved");
+      if (el_nome) el_nome.textContent = nome || "—";
+      if (el_saldo) el_saldo.textContent = visibile ? jenny(saldo) : "—";
+      if (el_url_saved) el_url_saved.value = url_scheda || "";
+      var block = document.getElementById("tcb-reg-scheda-block");
+      if (block) block.style["display"] = visibile ? "block" : "none";
+    }
+
+    function do_fetch_scheda() {
+      var url_raw = (document.getElementById("tcb-reg-url").value || "").trim();
+      var err = document.getElementById("tcb-reg-err");
+      err.textContent = "";
+      if (!url_raw) { err.textContent = "Inserisci l'URL della scheda."; return; }
+      var ha_t = url_raw.indexOf("?t=") !== -1 || url_raw.indexOf("&t=") !== -1;
+      if (!ha_t) { err.textContent = "URL non valido. Deve contenere ?t= (link diretto al topic della scheda)."; return; }
+
+      var btn = document.getElementById("tcb-reg-fetch-btn");
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+
+      var proxy_url = "https://api.allorigins.win/get?url=" + encodeURIComponent(url_raw);
+
+      fetch(proxy_url)
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (!data || !data.contents) {
+            err.textContent = "Impossibile leggere la scheda. Verifica che l'URL sia pubblico.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+            return;
+          }
+          var parser = new DOMParser();
+          var doc = parser.parseFromString(data.contents, "text/html");
+
+          var color_el = doc.querySelector(".color");
+          if (!color_el) {
+            err.textContent = "Nessun post trovato. Controlla che l'URL punti direttamente al topic della scheda.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+            return;
+          }
+
+          var nome_el = color_el.querySelector(".nomecognome");
+          var nome_pg = nome_el ? nome_el.textContent.trim() : "";
+          if (!nome_pg) {
+            err.textContent = "Nome del personaggio non trovato. Assicurati che la scheda sia valida.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+            return;
+          }
+
+          var saldo_jenny = 0;
+          var label_els = color_el.querySelectorAll(".scheda-label");
+          for (var i=0; i<label_els.length; i++) {
+            if (label_els[i].textContent.trim() === "Soldi:") {
+              var next_el = label_els[i].nextElementSibling;
+              if (next_el && next_el.classList.contains("scheda-entry")) {
+                var testo_soldi = next_el.textContent.trim();
+                var parte_jenny = testo_soldi.split("/")[0].trim();
+                parte_jenny = parte_jenny.replace(new RegExp("[^0-9]","g"), "");
+                saldo_jenny = parseInt(parte_jenny, 10) || 0;
+              }
+              break;
+            }
+          }
+
+          set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
+          btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
+        })
+        .catch(function() {
+          err.textContent = "Errore di rete. Riprova tra qualche secondo.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-search"></i> Carica';
+        });
+    }
+
+    function do_registrazione() {
+      var err = document.getElementById("tcb-reg-err");
+      err.textContent = "";
+
+      var url_scheda = (document.getElementById("tcb-reg-url-saved").value || "").trim();
+      var nome_pg_el = document.getElementById("tcb-reg-nome-pg");
+      var nome_pg = nome_pg_el ? nome_pg_el.textContent.trim() : "";
+      var saldo_el = document.getElementById("tcb-reg-saldo-pg");
+      var saldo_raw = saldo_el ? saldo_el.textContent.replace(new RegExp("[^0-9]","g"),"") : "0";
+      var saldo = parseInt(saldo_raw, 10) || 0;
+      var nick = (document.getElementById("tcb-reg-nick").value || "").trim();
+      var pass = (document.getElementById("tcb-reg-pass").value || "").trim();
+      var pass2 = (document.getElementById("tcb-reg-pass2").value || "").trim();
+      var avatar = (document.getElementById("tcb-reg-avatar").value || "").trim();
+
+      if (!url_scheda || !nome_pg || nome_pg === "—") { err.textContent = "Carica prima la scheda del personaggio."; return; }
+      if (!nick) { err.textContent = "Inserisci un nickname."; return; }
+      if (nick.length < 3) { err.textContent = "Il nickname deve avere almeno 3 caratteri."; return; }
+      if (!pass) { err.textContent = "Inserisci una password."; return; }
+      if (pass.length < 4) { err.textContent = "La password deve avere almeno 4 caratteri."; return; }
+      if (pass !== pass2) { err.textContent = "Le password non coincidono."; return; }
+
+      var btn = document.getElementById("tcb-reg-submit");
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Registrazione...';
+
+      db.ref("scommesse/credentials/" + nick_key(nick)).once("value").then(function(snap) {
+        if (snap.val()) {
+          err.textContent = "Nickname già in uso. Scegline un altro.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-user-check"></i> Crea account';
+          return Promise.reject("dup");
+        }
+        return db.ref("scommesse/schede").orderByValue().equalTo(url_scheda).once("value").then(function(snap2) {
+          if (snap2.val()) {
+            err.textContent = "Questa scheda è già collegata ad un altro account.";
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-user-check"></i> Crea account';
+            return Promise.reject("dup_scheda");
+          }
+          var uid = "u_" + Date.now() + "_" + Math.floor(Math.random()*9999);
+          var utente = {
+            uid: uid, nickname: nick, nome_pg: nome_pg,
+            url_scheda: url_scheda, saldo: saldo, admin: false, createdAt: Date.now()
+          };
+          if (avatar) utente.avatar = avatar;
+          return Promise.all([
+            db.ref("scommesse/utenti/" + uid).set(utente),
+            db.ref("scommesse/credentials/" + nick_key(nick)).set({ uid: uid, password: pass }),
+            db.ref("scommesse/schede/" + uid).set(url_scheda)
+          ]);
+        });
+      }).then(function() {
+        toast("Benvenuto/a, " + nome_pg + ". Puoi ora accedere.", "ok");
+        hide("tcb-reg-card");
+        show("tcb-login-card");
+        var inp_nick = document.getElementById("tcb-inp-nick");
+        if (inp_nick) inp_nick.value = nick;
+      }).catch(function(e) {
+        if (e !== "dup" && e !== "dup_scheda") {
+          err.textContent = "Errore durante la registrazione. Riprova.";
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-user-check"></i> Crea account';
+        }
+      });
+    }
 
     /* ── listeners ── */
     function avvia_listeners() {
@@ -556,6 +748,7 @@
     sessione_carica();
     avvia_listeners();
     init_login();
+    init_registrazione();
     init_tabs();
     render();
     if (state.utente) avvia_listener_utente(state.utente.uid);
