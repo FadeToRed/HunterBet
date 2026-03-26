@@ -1024,8 +1024,7 @@
           var sid = e.currentTarget.getAttribute("data-id");
           var sc = state.scontri[sid];
           if (!sc) return;
-          if (!confirm("Rimuovere definitivamente l'incontro "" + sc.titolo + ""?
-Questa azione è irreversibile.")) return;
+          if (!confirm("Rimuovere: " + sc.titolo + "?")) return;
           db.ref("scommesse/scontri/" + sid).remove()
             .then(function(){ toast("Incontro rimosso.", "ok"); })
             .catch(function(){ toast("Errore nella rimozione.", "err"); });
