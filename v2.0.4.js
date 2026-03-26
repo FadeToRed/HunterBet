@@ -16,7 +16,7 @@
   } else { init(); }
 
   function start(db) {
-    var state = { utente: null, scontri: {}, lottatori: {}, scommesse_utente: [] };
+    var state = { utente: null, scontri: {}, lottatori: {}, npc: {}, scommesse_utente: [] };
 
     /* ── sessione ── */
     function sessione_carica() {
@@ -363,12 +363,20 @@
       db.ref("scommesse/lottatori").on("value", function(snap) {
         state.lottatori = snap.val() || {};
         if (state.utente) {
-          /* aggiorna dropdown incontro se il panel admin è aperto */
           var adm = document.getElementById("adm-parti-wrap");
           if (adm && adm.offsetParent !== null) render_adm_lottatori_selects();
           var lott_list_el = document.getElementById("adm-lott-list");
           if (lott_list_el && lott_list_el.offsetParent !== null) render_adm_lottatori_list();
           render_classifica();
+        }
+      });
+      db.ref("scommesse/npc").on("value", function(snap) {
+        state.npc = snap.val() || {};
+        if (state.utente) {
+          var adm = document.getElementById("adm-parti-wrap");
+          if (adm && adm.offsetParent !== null) render_adm_lottatori_selects();
+          var npc_list_el = document.getElementById("adm-npc-list");
+          if (npc_list_el && npc_list_el.offsetParent !== null) render_adm_npc_list();
         }
       });
     }
@@ -462,7 +470,7 @@
         : '<span class="tcb-live-badge tcb-live-badge-closed"><i class="fas fa-circle"></i> IN CORSO</span>';
       var footer = "";
       if (aperto && s.ha_npc) {
-        footer = '<div class="tcb-fighter-notice"><i class="fas fa-info-circle"></i> Incontro con NPC — scommesse non disponibili.</div>';
+        footer = '<div class="tcb-fighter-notice"><i class="fas fa-info-circle"></i> Scommesse non disponibili.</div>';
       } else if (aperto && !utente_lottatore) {
         footer = '<button class="tcb-btn tcb-btn-accent tcb-bet-btn" data-id="' + esc(s.id) + '">' +
           '<i class="fas fa-plus-circle"></i> Piazza scommessa</button>';
@@ -754,6 +762,20 @@
           '<div class="tcb-adm-block-title"><i class="fas fa-list-ul"></i> Incontri in gestione</div>' +
           '<div id="tcb-adm-scontri-list"></div>' +
         '</div>' +
+        /* ── registra npc ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-robot"></i> Registra NPC</div>' +
+          '<input class="tcb-input" id="adm-npc-nome" placeholder="Nome">' +
+          '<input class="tcb-input" id="adm-npc-cognome" placeholder="Cognome (opzionale)">' +
+          '<input class="tcb-input" id="adm-npc-img" placeholder="URL immagine (opzionale)">' +
+          '<div id="adm-npc-msg" class="tcb-adm-msg"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="adm-npc-save-btn"><i class="fas fa-save"></i> Registra NPC</button>' +
+        '</div>' +
+        /* ── lista npc ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-robot"></i> NPC registrati</div>' +
+          '<div id="adm-npc-list"></div>' +
+        '</div>' +
         /* ── lista lottatori ── */
         '<div class="tcb-adm-block">' +
           '<div class="tcb-adm-block-title"><i class="fas fa-fist-raised"></i> Lottatori registrati</div>' +
@@ -770,6 +792,7 @@
 
       render_adm_lottatori_selects();
       render_admin_scontri_list();
+      render_adm_npc_list();
       render_adm_lottatori_list();
 
       /* event delegation: select changes in parti-wrap */
@@ -779,7 +802,7 @@
           if (e.target.classList.contains("adm-p-lott")) tcb_on_lott_change(e.target);
         });
         parti_wrap.addEventListener("input", function(e) {
-          if (e.target.classList.contains("adm-p-npc-nome")) tcb_aggiorna_titolo_incontro();
+          /* nothing needed for input in parti-wrap currently */
         });
       }
 
@@ -813,6 +836,7 @@
       });
 
       document.getElementById("adm-lott-save-btn").addEventListener("click", do_adm_registra_lottatore);
+      document.getElementById("adm-npc-save-btn").addEventListener("click", do_adm_registra_npc);
       document.getElementById("adm-add-part").addEventListener("click", function() {
         render_adm_lottatori_selects(true);
       });
@@ -823,11 +847,18 @@
     function render_adm_lottatori_selects(aggiungi) {
       var wrap = document.getElementById("adm-parti-wrap");
       if (!wrap) return;
-      var lott_list = Object.values(state.lottatori || {});
-      var opzioni = lott_list.map(function(l) {
+      var lott_list = Object.values(state.lottatori || {}).sort(function(a,b){ return (a.nome||"").localeCompare(b.nome||""); });
+      var npc_list  = Object.values(state.npc || {}).sort(function(a,b){ return (a.nome||"").localeCompare(b.nome||""); });
+      var opzioni_lott = lott_list.map(function(l) {
         return '<option value="' + esc(l.id) + '">' + esc(l.nome) + '</option>';
       }).join("");
-      if (!opzioni) opzioni = '<option value="">Nessun lottatore registrato</option>';
+      var opzioni_npc = npc_list.map(function(n) {
+        return '<option value="npc_' + esc(n.id) + '">' + esc(n.nome) + '</option>';
+      }).join("");
+      var opzioni = "";
+      if (opzioni_lott) opzioni += '<optgroup label="Lottatori">' + opzioni_lott + '</optgroup>';
+      if (opzioni_npc)  opzioni += '<optgroup label="NPC">' + opzioni_npc + '</optgroup>';
+      if (!opzioni) opzioni = '<option value="">Nessun lottatore o NPC registrato</option>';
 
       if (aggiungi) {
         var cnt = wrap.querySelectorAll(".adm-part-row").length;
@@ -849,6 +880,60 @@
           }
         }
       }
+    }
+
+    function do_adm_registra_npc() {
+      var nome = (document.getElementById("adm-npc-nome").value || "").trim();
+      var cognome = (document.getElementById("adm-npc-cognome").value || "").trim();
+      var immagine = (document.getElementById("adm-npc-img").value || "").trim();
+      var msg = document.getElementById("adm-npc-msg");
+      msg.textContent = ""; msg.className = "tcb-adm-msg";
+      if (!nome) { msg.textContent = "Inserisci almeno il nome."; return; }
+      var nome_completo = cognome ? nome + " " + cognome : nome;
+      var nid = "n_" + Date.now();
+      var npc_obj = { id: nid, nome: nome_completo, createdAt: Date.now() };
+      if (immagine) npc_obj.immagine = immagine;
+      db.ref("scommesse/npc/" + nid).set(npc_obj).then(function() {
+        msg.className = "tcb-adm-msg tcb-adm-ok";
+        msg.textContent = "NPC registrato.";
+        document.getElementById("adm-npc-nome").value = "";
+        document.getElementById("adm-npc-cognome").value = "";
+        document.getElementById("adm-npc-img").value = "";
+      }).catch(function() { msg.textContent = "Errore durante la registrazione."; });
+    }
+
+    function render_adm_npc_list() {
+      var el = document.getElementById("adm-npc-list");
+      if (!el) return;
+      var list = Object.values(state.npc || {}).sort(function(a,b){ return (a.nome||"").localeCompare(b.nome||""); });
+      if (!list.length) { el.innerHTML = '<div class="tcb-adm-empty">Nessun NPC registrato.</div>'; return; }
+      var html = "";
+      for (var i=0; i<list.length; i++) {
+        var n = list[i];
+        var img_html = n.immagine
+          ? '<img src="' + esc(n.immagine) + '" alt="" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0">'
+          : '<div style="width:30px;height:30px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:var(--text-3)"><i class="fas fa-robot"></i></div>';
+        html += '<div class="tcb-adm-row">' +
+          '<div class="tcb-adm-row-info" style="gap:10px">' + img_html +
+            '<span class="tcb-adm-row-title">' + esc(n.nome) + '</span>' +
+          '</div>' +
+          '<div class="tcb-adm-row-btns">' +
+            '<button class="tcb-btn tcb-btn-outline tcb-btn-xs adm-rimuovi-npc" data-nid="' + esc(n.id) + '" style="border-color:rgba(248,81,73,0.4);color:var(--loss)"><i class="fas fa-trash"></i> Rimuovi</button>' +
+          '</div>' +
+        '</div>';
+      }
+      el.innerHTML = html;
+      el.querySelectorAll(".adm-rimuovi-npc").forEach(function(btn) {
+        btn.addEventListener("click", function(e) {
+          var nid = e.currentTarget.getAttribute("data-nid");
+          var n = state.npc[nid];
+          if (!n) return;
+          if (!confirm("Rimuovere l\'NPC \"" + n.nome + "\"?")) return;
+          db.ref("scommesse/npc/" + nid).remove()
+            .then(function(){ toast("NPC rimosso.", "ok"); render_adm_npc_list(); })
+            .catch(function(){ toast("Errore.", "err"); });
+        });
+      });
     }
 
     function render_adm_lottatori_list() {
@@ -889,11 +974,9 @@
     function adm_lott_row(idx, opzioni) {
       return '<div class="adm-part-row" id="adm-part-row-' + idx + '">' +
         '<select class="tcb-input adm-p-lott" data-idx="' + idx + '">' +
-          '<option value="">— Lottatore ' + (idx+1) + ' —</option>' +
-          '<option value="__NPC__">NPC</option>' +
+          '<option value="">— Contendente ' + (idx+1) + ' —</option>' +
           opzioni +
         '</select>' +
-        '<input class="tcb-input adm-p-npc-nome" placeholder="Nome NPC" style="display:none">' +
         '<input class="tcb-input adm-p-quota" type="number" step="0.01" min="1.01" placeholder="Quota">' +
       '</div>';
     }
@@ -901,14 +984,12 @@
     /* called via event delegation on adm-parti-wrap select changes */
     function tcb_on_lott_change(sel) {
       var row = sel.parentNode;
-      var npc_inp = row.querySelector(".adm-p-npc-nome");
       var quota_inp = row.querySelector(".adm-p-quota");
-      if (sel.value === "__NPC__") {
-        npc_inp.style["display"] = "block";
+      /* NPC entries have prefix npc_ — hide quota since NPCs don't have odds */
+      if (sel.value && sel.value.indexOf("npc_") === 0) {
         quota_inp.style["display"] = "none";
-        quota_inp.value = "";
+        quota_inp.value = "1";
       } else {
-        npc_inp.style["display"] = "none";
         quota_inp.style["display"] = "block";
       }
       tcb_aggiorna_titolo_incontro();
@@ -922,12 +1003,12 @@
       var nomi = [];
       for (var i = 0; i < rows.length; i++) {
         var sel = rows[i].querySelector(".adm-p-lott");
-        if (!sel) continue;
-        if (sel.value === "__NPC__") {
-          var npc_inp = rows[i].querySelector(".adm-p-npc-nome");
-          var npc_nome = npc_inp ? npc_inp.value.trim() : "";
-          nomi.push(npc_nome || "NPC");
-        } else if (sel.value && state.lottatori[sel.value]) {
+        if (!sel || !sel.value) continue;
+        if (sel.value.indexOf("npc_") === 0) {
+          var npc_id = sel.value.slice(4);
+          var npc_entry = state.npc[npc_id];
+          nomi.push(npc_entry ? npc_entry.nome : "NPC");
+        } else if (state.lottatori[sel.value]) {
           nomi.push(state.lottatori[sel.value].nome);
         }
       }
@@ -1044,11 +1125,11 @@
         var sel = rows[i].querySelector(".adm-p-lott");
         var lid = sel ? sel.value : "";
         if (!lid) { msg.textContent = "Seleziona tutti i lottatori."; return; }
-        if (lid === "__NPC__") {
-          var npc_nome_inp = rows[i].querySelector(".adm-p-npc-nome");
-          var npc_nome = npc_nome_inp ? npc_nome_inp.value.trim() : "";
-          if (!npc_nome) { msg.textContent = "Inserisci il nome dell'NPC."; return; }
-          parti.push({ lott_id: "__NPC__", nome: npc_nome, url_scheda: null, immagine: null, quota: 1 });
+        if (lid.indexOf("npc_") === 0) {
+          var npc_id = lid.slice(4);
+          var npc_entry = state.npc[npc_id];
+          if (!npc_entry) { msg.textContent = "NPC non trovato."; return; }
+          parti.push({ lott_id: lid, nome: npc_entry.nome, url_scheda: null, immagine: npc_entry.immagine || null, quota: 1 });
           ha_npc = true;
         } else {
           var quota = parseFloat(rows[i].querySelector(".adm-p-quota").value);
