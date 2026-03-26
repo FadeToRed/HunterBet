@@ -366,6 +366,8 @@
           /* aggiorna dropdown incontro se il panel admin è aperto */
           var adm = document.getElementById("adm-parti-wrap");
           if (adm && adm.offsetParent !== null) render_adm_lottatori_selects();
+          var lott_list_el = document.getElementById("adm-lott-list");
+          if (lott_list_el && lott_list_el.offsetParent !== null) render_adm_lottatori_list();
           render_classifica();
         }
       });
@@ -417,6 +419,18 @@
       el.innerHTML = html;
       var btns = el.querySelectorAll(".tcb-bet-btn");
       for (var j=0; j<btns.length; j++) btns[j].addEventListener("click", on_bet_click);
+      var del_btns = el.querySelectorAll(".adm-rimuovi-card");
+      for (var d=0; d<del_btns.length; d++) {
+        del_btns[d].addEventListener("click", function(e) {
+          var sid = e.currentTarget.getAttribute("data-id");
+          var sc = state.scontri[sid];
+          if (!sc) return;
+          if (!confirm("Rimuovere l'incontro \"" + sc.titolo + "\"?")) return;
+          db.ref("scommesse/scontri/" + sid).remove()
+            .then(function(){ toast("Incontro rimosso.", "ok"); })
+            .catch(function(){ toast("Errore.", "err"); });
+        });
+      }
     }
 
     function build_card(s) {
@@ -447,7 +461,9 @@
         ? '<span class="tcb-live-badge"><i class="fas fa-circle"></i> APERTO</span>'
         : '<span class="tcb-live-badge tcb-live-badge-closed"><i class="fas fa-circle"></i> IN CORSO</span>';
       var footer = "";
-      if (aperto && !utente_lottatore) {
+      if (aperto && s.ha_npc) {
+        footer = '<div class="tcb-fighter-notice"><i class="fas fa-info-circle"></i> Incontro con NPC — scommesse non disponibili.</div>';
+      } else if (aperto && !utente_lottatore) {
         footer = '<button class="tcb-btn tcb-btn-accent tcb-bet-btn" data-id="' + esc(s.id) + '">' +
           '<i class="fas fa-plus-circle"></i> Piazza scommessa</button>';
       } else if (aperto && utente_lottatore) {
@@ -455,8 +471,12 @@
       } else {
         footer = '<div class="tcb-fighter-notice"><i class="fas fa-lock"></i> Scommesse chiuse — incontro in corso.</div>';
       }
+      var admin_del = "";
+      if (state.utente && state.utente.admin === true) {
+        admin_del = '<button class="tcb-btn tcb-btn-xs adm-rimuovi-card" data-id="' + esc(s.id) + '" style="background:none;border:none;color:var(--text-3);cursor:pointer;padding:0 4px;float:right" title="Rimuovi incontro"><i class="fas fa-trash"></i></button>';
+      }
       return '<div class="tcb-match-card">' +
-        '<div class="tcb-match-meta"><span class="tcb-match-league"><i class="mdi mdi-sword-cross"></i> Torre Celeste</span>' + badge + '</div>' +
+        '<div class="tcb-match-meta"><span class="tcb-match-league"><i class="mdi mdi-sword-cross"></i> Torre Celeste</span>' + badge + admin_del + '</div>' +
         '<div class="tcb-match-title">' + esc(s.titolo) + '</div>' +
         '<div class="tcb-fighters-row">' + parti + '</div>' +
         footer + '</div>';
@@ -472,7 +492,7 @@
     function render_vecchi_scontri() {
       var el = document.getElementById("tcb-vecchi-list");
       if (!el) return;
-      var list = Object.values(state.scontri).filter(function(s){ return s.stato === "terminato"; });
+      var list = Object.values(state.scontri).filter(function(s){ return s.stato === "concluso"; });
       if (!list.length) {
         el.innerHTML = '<div class="tcb-empty-state"><i class="fas fa-history"></i><p>Nessun incontro terminato.</p></div>';
         return;
@@ -489,12 +509,28 @@
             (ha_vinto ? '<i class="fas fa-trophy"></i> ' : '<i class="fas fa-times"></i> ') +
             esc(p.nome) + '</span>';
         }
+        var vecchio_del = "";
+        if (state.utente && state.utente.admin === true) {
+          vecchio_del = '<button class="tcb-btn tcb-btn-xs adm-rimuovi-vecchio" data-id="' + esc(s.id) + '" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:11px" title="Rimuovi"><i class="fas fa-trash"></i></button>';
+        }
         html += '<div class="tcb-vecchio-card">' +
-          '<div class="tcb-vecchio-title">' + esc(s.titolo) + '</div>' +
+          '<div class="tcb-vecchio-title">' + esc(s.titolo) + vecchio_del + '</div>' +
           '<div class="tcb-vecchio-fighters">' + parti_html + '</div>' +
           '</div>';
       }
       el.innerHTML = html;
+      var vdel = el.querySelectorAll(".adm-rimuovi-vecchio");
+      for (var vd=0; vd<vdel.length; vd++) {
+        vdel[vd].addEventListener("click", function(e) {
+          var sid = e.currentTarget.getAttribute("data-id");
+          var sc = state.scontri[sid];
+          if (!sc) return;
+          if (!confirm("Rimuovere l'incontro \"" + sc.titolo + "\"?")) return;
+          db.ref("scommesse/scontri/" + sid).remove()
+            .then(function(){ toast("Incontro rimosso.", "ok"); })
+            .catch(function(){ toast("Errore.", "err"); });
+        });
+      }
     }
 
     /* ── classifica lottatori ── */
@@ -508,7 +544,7 @@
       Object.keys(lott_map).forEach(function(lid) {
         punteggi[lid] = { nome: lott_map[lid].nome, immagine: lott_map[lid].immagine || null, v: 0, s: 0 };
       });
-      var terminati = Object.values(state.scontri).filter(function(s){ return s.stato === "terminato" && s.vincitore_lott_id; });
+      var terminati = Object.values(state.scontri).filter(function(s){ return s.stato === "concluso" && s.vincitore_lott_id; });
       for (var i=0; i<terminati.length; i++) {
         var sc = terminati[i];
         for (var k=0; k<sc.partecipanti.length; k++) {
@@ -718,6 +754,11 @@
           '<div class="tcb-adm-block-title"><i class="fas fa-list-ul"></i> Incontri in gestione</div>' +
           '<div id="tcb-adm-scontri-list"></div>' +
         '</div>' +
+        /* ── lista lottatori ── */
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-fist-raised"></i> Lottatori registrati</div>' +
+          '<div id="adm-lott-list"></div>' +
+        '</div>' +
         /* ── modifica saldo ── */
         '<div class="tcb-adm-block">' +
           '<div class="tcb-adm-block-title"><i class="fas fa-wallet"></i> Modifica saldo utente</div>' +
@@ -729,6 +770,18 @@
 
       render_adm_lottatori_selects();
       render_admin_scontri_list();
+      render_adm_lottatori_list();
+
+      /* event delegation: select changes in parti-wrap */
+      var parti_wrap = document.getElementById("adm-parti-wrap");
+      if (parti_wrap) {
+        parti_wrap.addEventListener("change", function(e) {
+          if (e.target.classList.contains("adm-p-lott")) tcb_on_lott_change(e.target);
+        });
+        parti_wrap.addEventListener("input", function(e) {
+          if (e.target.classList.contains("adm-p-npc-nome")) tcb_aggiorna_titolo_incontro();
+        });
+      }
 
       /* fetch scheda lottatore */
       document.getElementById("adm-lott-fetch-btn").addEventListener("click", function() {
@@ -798,11 +851,87 @@
       }
     }
 
+    function render_adm_lottatori_list() {
+      var el = document.getElementById("adm-lott-list");
+      if (!el) return;
+      var list = Object.values(state.lottatori || {});
+      if (!list.length) { el.innerHTML = '<div class="tcb-adm-empty">Nessun lottatore registrato.</div>'; return; }
+      list.sort(function(a,b){ return (a.nome||"").localeCompare(b.nome||""); });
+      var html = "";
+      for (var i=0; i<list.length; i++) {
+        var l = list[i];
+        var img_html = l.immagine
+          ? '<img class="tcb-hdr-avatar" src="' + esc(l.immagine) + '" alt="" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0">'
+          : '<div style="width:30px;height:30px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:var(--text-3)"><i class="fas fa-user"></i></div>';
+        html += '<div class="tcb-adm-row">' +
+          '<div class="tcb-adm-row-info" style="gap:10px">' + img_html +
+            '<span class="tcb-adm-row-title">' + esc(l.nome) + '</span>' +
+          '</div>' +
+          '<div class="tcb-adm-row-btns">' +
+            '<button class="tcb-btn tcb-btn-outline tcb-btn-xs adm-rimuovi-lott" data-lid="' + esc(l.id) + '" style="border-color:rgba(248,81,73,0.4);color:var(--loss)"><i class="fas fa-trash"></i> Rimuovi</button>' +
+          '</div>' +
+        '</div>';
+      }
+      el.innerHTML = html;
+      el.querySelectorAll(".adm-rimuovi-lott").forEach(function(btn) {
+        btn.addEventListener("click", function(e) {
+          var lid = e.currentTarget.getAttribute("data-lid");
+          var lott = state.lottatori[lid];
+          if (!lott) return;
+          if (!confirm("Rimuovere il lottatore \"" + lott.nome + "\"?\nAttenzione: gli incontri che lo coinvolgono non verranno modificati.")) return;
+          db.ref("scommesse/lottatori/" + lid).remove()
+            .then(function(){ toast("Lottatore rimosso.", "ok"); render_adm_lottatori_list(); })
+            .catch(function(){ toast("Errore nella rimozione.", "err"); });
+        });
+      });
+    }
+
     function adm_lott_row(idx, opzioni) {
-      return '<div class="adm-part-row">' +
-        '<select class="tcb-input adm-p-lott"><option value="">— Lottatore ' + (idx+1) + ' —</option>' + opzioni + '</select>' +
+      return '<div class="adm-part-row" id="adm-part-row-' + idx + '">' +
+        '<select class="tcb-input adm-p-lott" data-idx="' + idx + '">' +
+          '<option value="">— Lottatore ' + (idx+1) + ' —</option>' +
+          '<option value="__NPC__">NPC</option>' +
+          opzioni +
+        '</select>' +
+        '<input class="tcb-input adm-p-npc-nome" placeholder="Nome NPC" style="display:none">' +
         '<input class="tcb-input adm-p-quota" type="number" step="0.01" min="1.01" placeholder="Quota">' +
       '</div>';
+    }
+
+    /* called via event delegation on adm-parti-wrap select changes */
+    function tcb_on_lott_change(sel) {
+      var row = sel.parentNode;
+      var npc_inp = row.querySelector(".adm-p-npc-nome");
+      var quota_inp = row.querySelector(".adm-p-quota");
+      if (sel.value === "__NPC__") {
+        npc_inp.style["display"] = "block";
+        quota_inp.style["display"] = "none";
+        quota_inp.value = "";
+      } else {
+        npc_inp.style["display"] = "none";
+        quota_inp.style["display"] = "block";
+      }
+      tcb_aggiorna_titolo_incontro();
+    }
+    window["tcb_on_lott_change"] = tcb_on_lott_change;
+
+    function tcb_aggiorna_titolo_incontro() {
+      var titolo_inp = document.getElementById("adm-titolo");
+      if (!titolo_inp) return;
+      var rows = document.querySelectorAll(".adm-part-row");
+      var nomi = [];
+      for (var i = 0; i < rows.length; i++) {
+        var sel = rows[i].querySelector(".adm-p-lott");
+        if (!sel) continue;
+        if (sel.value === "__NPC__") {
+          var npc_inp = rows[i].querySelector(".adm-p-npc-nome");
+          var npc_nome = npc_inp ? npc_inp.value.trim() : "";
+          nomi.push(npc_nome || "NPC");
+        } else if (sel.value && state.lottatori[sel.value]) {
+          nomi.push(state.lottatori[sel.value].nome);
+        }
+      }
+      if (nomi.length >= 2) titolo_inp.value = nomi.join(" VS ");
     }
 
     function do_adm_registra_lottatore() {
@@ -869,6 +998,8 @@
             btns += '<button class="tcb-btn tcb-btn-win tcb-btn-xs adm-vinci" data-id="' + esc(s.id) + '" data-pidx="' + k + '"><i class="fas fa-trophy"></i> ' + esc(s.partecipanti[k].nome) + '</button>';
           }
         }
+        /* rimozione disponibile per tutti gli stati */
+        btns += '<button class="tcb-btn tcb-btn-outline tcb-btn-xs adm-rimuovi-scontro" data-id="' + esc(s.id) + '" style="border-color:rgba(248,81,73,0.4);color:var(--loss)"><i class="fas fa-trash"></i></button>';
         html += '<div class="tcb-adm-row">' +
           '<div class="tcb-adm-row-info"><span class="tcb-adm-row-title">' + esc(s.titolo) + '</span><span class="tcb-badge ' + bc + '">' + bl + '</span></div>' +
           '<div class="tcb-adm-row-btns">' + btns + '</div></div>';
@@ -888,6 +1019,18 @@
           do_adm_vinci(e.currentTarget.getAttribute("data-id"), parseInt(e.currentTarget.getAttribute("data-pidx"),10));
         });
       });
+      el.querySelectorAll(".adm-rimuovi-scontro").forEach(function(btn) {
+        btn.addEventListener("click", function(e) {
+          var sid = e.currentTarget.getAttribute("data-id");
+          var sc = state.scontri[sid];
+          if (!sc) return;
+          if (!confirm("Rimuovere definitivamente l'incontro "" + sc.titolo + ""?
+Questa azione è irreversibile.")) return;
+          db.ref("scommesse/scontri/" + sid).remove()
+            .then(function(){ toast("Incontro rimosso.", "ok"); })
+            .catch(function(){ toast("Errore nella rimozione.", "err"); });
+        });
+      });
     }
 
     function do_adm_crea() {
@@ -897,19 +1040,35 @@
       if (!titolo) { msg.textContent = "Inserisci il titolo."; return; }
       var rows = document.querySelectorAll(".adm-part-row");
       var parti = [];
+      var ha_npc = false;
       for (var i=0; i<rows.length; i++) {
-        var lid = rows[i].querySelector(".adm-p-lott").value;
-        var quota = parseFloat(rows[i].querySelector(".adm-p-quota").value);
-        if (!lid || !quota || quota < 1.01) { msg.textContent = "Seleziona tutti i lottatori e imposta le quote (min 1.01)."; return; }
-        var lott = state.lottatori[lid];
-        if (!lott) { msg.textContent = "Lottatore non trovato."; return; }
-        parti.push({ lott_id: lid, nome: lott.nome, url_scheda: lott.url_scheda, immagine: lott.immagine || null, quota: quota });
+        var sel = rows[i].querySelector(".adm-p-lott");
+        var lid = sel ? sel.value : "";
+        if (!lid) { msg.textContent = "Seleziona tutti i lottatori."; return; }
+        if (lid === "__NPC__") {
+          var npc_nome_inp = rows[i].querySelector(".adm-p-npc-nome");
+          var npc_nome = npc_nome_inp ? npc_nome_inp.value.trim() : "";
+          if (!npc_nome) { msg.textContent = "Inserisci il nome dell'NPC."; return; }
+          parti.push({ lott_id: "__NPC__", nome: npc_nome, url_scheda: null, immagine: null, quota: 1 });
+          ha_npc = true;
+        } else {
+          var quota = parseFloat(rows[i].querySelector(".adm-p-quota").value);
+          if (!quota || quota < 1.01) { msg.textContent = "Imposta le quote per tutti i lottatori (min 1.01)."; return; }
+          var lott = state.lottatori[lid];
+          if (!lott) { msg.textContent = "Lottatore non trovato."; return; }
+          parti.push({ lott_id: lid, nome: lott.nome, url_scheda: lott.url_scheda, immagine: lott.immagine || null, quota: quota });
+        }
       }
-      if (parti.length < 2) { msg.textContent = "Servono almeno 2 lottatori."; return; }
+      if (parti.length < 2) { msg.textContent = "Servono almeno 2 contendenti."; return; }
       var id = "c_" + Date.now();
-      db.ref("scommesse/scontri/" + id).set({ id:id, titolo:titolo, partecipanti:parti, stato:"aperto", vincitore:null, vincitore_lott_id:null, createdAt:Date.now() })
-        .then(function() { msg.className="tcb-adm-msg tcb-adm-ok"; msg.textContent="Incontro creato."; document.getElementById("adm-titolo").value=""; })
-        .catch(function(){ msg.textContent="Errore."; });
+      db.ref("scommesse/scontri/" + id).set({
+        id:id, titolo:titolo, partecipanti:parti,
+        stato:"aperto", vincitore:null, vincitore_lott_id:null,
+        ha_npc: ha_npc, createdAt:Date.now()
+      }).then(function() {
+        msg.className="tcb-adm-msg tcb-adm-ok"; msg.textContent="Incontro creato.";
+        document.getElementById("adm-titolo").value="";
+      }).catch(function(){ msg.textContent="Errore."; });
     }
 
     function do_adm_vinci(sc_id, pidx) {
@@ -953,7 +1112,142 @@
         if (res && res.committed) { msg.className="tcb-adm-msg tcb-adm-ok"; msg.textContent="Saldo aggiornato."; }
       }).catch(function(e){ if(e!=="nf") msg.textContent="Errore."; });
     }
-    /* ── tabs ── */
+
+    /* ── profilo ── */
+    function render_profilo_panel() {
+      var el = document.getElementById("tcb-profilo-panel");
+      if (!el || !state.utente) return;
+      var avatar_preview = state.utente.avatar
+        ? '<img class="tcb-avatar-preview" id="prof-avatar-preview" src="' + esc(state.utente.avatar) + '" alt="" style="display:block">'
+        : '<img class="tcb-avatar-preview" id="prof-avatar-preview" src="" alt="" style="display:none">';
+      el.innerHTML =
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-id-card"></i> Dati personaggio</div>' +
+          '<div class="tcb-profilo-pg-row">' +
+            (state.utente.avatar
+              ? '<img class="tcb-profilo-avatar" src="' + esc(state.utente.avatar) + '" alt="">'
+              : '<div class="tcb-profilo-avatar-placeholder"><i class="fas fa-user"></i></div>') +
+            '<div>' +
+              '<div class="tcb-profilo-nome">' + esc(state.utente.nome_pg || state.utente.nickname) + '</div>' +
+              '<a class="tcb-profilo-link" href="' + esc(state.utente.url_scheda || "#") + '" target="_blank">' +
+                '<i class="fas fa-external-link-alt"></i> Scheda personaggio</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-pen"></i> Modifica nickname</div>' +
+          '<input class="tcb-input" id="prof-nick" type="text" value="' + esc(state.utente.nickname) + '">' +
+          '<div id="prof-nick-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-nick-btn"><i class="fas fa-save"></i> Salva nickname</button>' +
+          '<div id="prof-nick-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-image"></i> Modifica avatar</div>' +
+          '<div class="tcb-avatar-row">' +
+            '<input class="tcb-input" id="prof-avatar" type="text" placeholder="URL immagine avatar" value="' + esc(state.utente.avatar || "") + '">' +
+            avatar_preview +
+          '</div>' +
+          '<div id="prof-avatar-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-avatar-btn"><i class="fas fa-save"></i> Salva avatar</button>' +
+          '<div id="prof-avatar-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>' +
+        '<div class="tcb-adm-block">' +
+          '<div class="tcb-adm-block-title"><i class="fas fa-lock"></i> Modifica password</div>' +
+          '<input class="tcb-input" id="prof-pass-old" type="password" placeholder="Password attuale">' +
+          '<input class="tcb-input" id="prof-pass-new" type="password" placeholder="Nuova password (min. 4 caratteri)">' +
+          '<input class="tcb-input" id="prof-pass-new2" type="password" placeholder="Conferma nuova password">' +
+          '<div id="prof-pass-err" class="tcb-field-err"></div>' +
+          '<button class="tcb-btn tcb-btn-primary" id="prof-pass-btn"><i class="fas fa-save"></i> Salva password</button>' +
+          '<div id="prof-pass-ok" class="tcb-adm-msg tcb-adm-ok"></div>' +
+        '</div>';
+
+      document.getElementById("prof-avatar").addEventListener("input", function() {
+        var preview = document.getElementById("prof-avatar-preview");
+        if (!preview) return;
+        var v = this.value.trim();
+        if (v) { preview.src = v; preview.style["display"] = "block"; }
+        else { preview.style["display"] = "none"; preview.src = ""; }
+      });
+
+      document.getElementById("prof-nick-btn").addEventListener("click", function() {
+        var nuovo_nick = (document.getElementById("prof-nick").value || "").trim();
+        var err = document.getElementById("prof-nick-err");
+        var ok = document.getElementById("prof-nick-ok");
+        err.textContent = ""; ok.textContent = "";
+        if (!nuovo_nick || nuovo_nick.length < 3) { err.textContent = "Almeno 3 caratteri."; return; }
+        if (nuovo_nick === state.utente.nickname) { err.textContent = "È già il tuo nickname attuale."; return; }
+        var btn = document.getElementById("prof-nick-btn");
+        btn.disabled = true;
+        db.ref("scommesse/credentials/" + nick_key(nuovo_nick)).once("value").then(function(snap) {
+          if (snap.val()) { err.textContent = "Nickname già in uso."; btn.disabled = false; return Promise.reject("dup"); }
+          var old_key = nick_key(state.utente.nickname);
+          var new_key = nick_key(nuovo_nick);
+          return db.ref("scommesse/credentials/" + old_key).once("value").then(function(snap2) {
+            var cred = snap2.val();
+            return Promise.all([
+              db.ref("scommesse/credentials/" + new_key).set(cred),
+              db.ref("scommesse/credentials/" + old_key).remove(),
+              db.ref("scommesse/utenti/" + state.utente.uid + "/nickname").set(nuovo_nick)
+            ]);
+          });
+        }).then(function() {
+          state.utente.nickname = nuovo_nick;
+          sessione_salva(state.utente);
+          render_header();
+          ok.textContent = "Nickname aggiornato.";
+          btn.disabled = false;
+        }).catch(function(e) { if (e !== "dup") { err.textContent = "Errore. Riprova."; btn.disabled = false; } });
+      });
+
+      document.getElementById("prof-avatar-btn").addEventListener("click", function() {
+        var nuovo_avatar = (document.getElementById("prof-avatar").value || "").trim();
+        var err = document.getElementById("prof-avatar-err");
+        var ok = document.getElementById("prof-avatar-ok");
+        err.textContent = ""; ok.textContent = "";
+        var btn = document.getElementById("prof-avatar-btn");
+        btn.disabled = true;
+        db.ref("scommesse/utenti/" + state.utente.uid + "/avatar").set(nuovo_avatar || null)
+          .then(function() {
+            state.utente.avatar = nuovo_avatar || null;
+            sessione_salva(state.utente);
+            render_header();
+            ok.textContent = "Avatar aggiornato.";
+            btn.disabled = false;
+          }).catch(function() { err.textContent = "Errore. Riprova."; btn.disabled = false; });
+      });
+
+      document.getElementById("prof-pass-btn").addEventListener("click", function() {
+        var old_pass = (document.getElementById("prof-pass-old").value || "").trim();
+        var new_pass = (document.getElementById("prof-pass-new").value || "").trim();
+        var new_pass2 = (document.getElementById("prof-pass-new2").value || "").trim();
+        var err = document.getElementById("prof-pass-err");
+        var ok = document.getElementById("prof-pass-ok");
+        err.textContent = ""; ok.textContent = "";
+        if (!old_pass) { err.textContent = "Inserisci la password attuale."; return; }
+        if (!new_pass || new_pass.length < 4) { err.textContent = "Almeno 4 caratteri."; return; }
+        if (new_pass !== new_pass2) { err.textContent = "Le password non coincidono."; return; }
+        var btn = document.getElementById("prof-pass-btn");
+        btn.disabled = true;
+        var cred_key = nick_key(state.utente.nickname);
+        db.ref("scommesse/credentials/" + cred_key).once("value").then(function(snap) {
+          var cred = snap.val();
+          if (!cred || cred.password !== old_pass) {
+            err.textContent = "Password attuale errata."; btn.disabled = false;
+            return Promise.reject("wrong");
+          }
+          return db.ref("scommesse/credentials/" + cred_key + "/password").set(new_pass);
+        }).then(function() {
+          ok.textContent = "Password aggiornata.";
+          document.getElementById("prof-pass-old").value = "";
+          document.getElementById("prof-pass-new").value = "";
+          document.getElementById("prof-pass-new2").value = "";
+          btn.disabled = false;
+        }).catch(function(e) { if (e !== "wrong") { err.textContent = "Errore. Riprova."; btn.disabled = false; } });
+      });
+    }
+
+
+    /* ── tabs + boot ── */
     function init_tabs() {
       var tabs = document.querySelectorAll("#tcb-wrap .tcb-tab");
       var panels = document.querySelectorAll("#tcb-wrap .tcb-panel");
@@ -966,10 +1260,10 @@
             var p = document.getElementById("tcb-panel-" + tab.getAttribute("data-tab"));
             if (p) {
               p.style["display"] = "block";
-              if (tab.getAttribute("data-tab")==="admin") render_admin_panel();
-              if (tab.getAttribute("data-tab")==="vecchi") render_vecchi_scontri();
-              if (tab.getAttribute("data-tab")==="classifica") render_classifica();
-              if (tab.getAttribute("data-tab")==="profilo") render_profilo_panel();
+              if (tab.getAttribute("data-tab") === "admin") render_admin_panel();
+              if (tab.getAttribute("data-tab") === "vecchi") render_vecchi_scontri();
+              if (tab.getAttribute("data-tab") === "classifica") render_classifica();
+              if (tab.getAttribute("data-tab") === "profilo") render_profilo_panel();
             }
           };
         })(tabs[i]));
