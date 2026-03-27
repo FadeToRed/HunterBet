@@ -176,7 +176,7 @@
         var el = document.getElementById(ids[i]);
         if (el) el.value = "";
       }
-      set_scheda_fields("","",0, false);
+      set_scheda_fields("","", false);
       var err = document.getElementById("tcb-reg-err");
       if (err) err.textContent = "";
       var preview = document.getElementById("tcb-reg-avatar-preview");
@@ -185,12 +185,10 @@
       if (fetch_btn) { fetch_btn.disabled = false; fetch_btn.innerHTML = '<i class="fas fa-search"></i> Carica'; }
     }
 
-    function set_scheda_fields(nome, url_scheda, saldo, visibile) {
+    function set_scheda_fields(nome, url_scheda, visibile) {
       var el_nome = document.getElementById("tcb-reg-nome-pg");
-      var el_saldo = document.getElementById("tcb-reg-saldo-pg");
       var el_url_saved = document.getElementById("tcb-reg-url-saved");
       if (el_nome) el_nome.textContent = nome || "—";
-      if (el_saldo) el_saldo.textContent = visibile ? jenny(saldo) : "—";
       if (el_url_saved) el_url_saved.value = url_scheda || "";
       var block = document.getElementById("tcb-reg-scheda-block");
       if (block) block.style["display"] = visibile ? "block" : "none";
@@ -255,16 +253,7 @@
           }
 
           /* saldo: cerca "Soldi:" e prende l'entry successiva */
-          var soldi_raw = leggi_label(post, "Soldi:");
-          var saldo_jenny = 0;
-          if (soldi_raw) {
-            /* formato "100000 Jenny / 42 HC" — prendi solo prima del "/" */
-            var parte_jenny = soldi_raw.split("/")[0].trim();
-            parte_jenny = parte_jenny.replace(new RegExp("[^0-9]", "g"), "");
-            saldo_jenny = parseInt(parte_jenny, 10) || 0;
-          }
-
-          set_scheda_fields(nome_pg, url_raw, saldo_jenny, true);
+          set_scheda_fields(nome_pg, url_raw, true);
           btn.innerHTML = '<i class="fas fa-check"></i> Caricata';
         })
         .catch(function(e) {
@@ -281,9 +270,7 @@
       var url_scheda = (document.getElementById("tcb-reg-url-saved").value || "").trim();
       var nome_pg_el = document.getElementById("tcb-reg-nome-pg");
       var nome_pg = nome_pg_el ? nome_pg_el.textContent.trim() : "";
-      var saldo_el = document.getElementById("tcb-reg-saldo-pg");
-      var saldo_raw = saldo_el ? saldo_el.textContent.replace(new RegExp("[^0-9]","g"),"") : "0";
-      var saldo = parseInt(saldo_raw, 10) || 0;
+
       var nick = (document.getElementById("tcb-reg-nick").value || "").trim();
       var pass = (document.getElementById("tcb-reg-pass").value || "").trim();
       var pass2 = (document.getElementById("tcb-reg-pass2").value || "").trim();
@@ -317,7 +304,7 @@
           var uid = "u_" + Date.now() + "_" + Math.floor(Math.random()*9999);
           var utente = {
             uid: uid, nickname: nick, nome_pg: nome_pg,
-            url_scheda: url_scheda, saldo: saldo, admin: false, createdAt: Date.now()
+            url_scheda: url_scheda, admin: false, createdAt: Date.now()
           };
           if (avatar) utente.avatar = avatar;
           return Promise.all([
@@ -732,6 +719,8 @@
             }),
             db.ref("scommesse/avvisi/" + avviso_id).set({
               id: avviso_id,
+              nome_pg: state.utente.nome_pg || state.utente.nickname,
+              url_scheda: state.utente.url_scheda || null,
               testo: (state.utente.nome_pg || state.utente.nickname) + " ha scommesso " + jenny(importo) + " su \"" + scontro.titolo + "\" (" + part.nome + ")",
               tipo: "scommessa",
               gestito: false,
@@ -1321,13 +1310,21 @@
             var av_id = "av_" + Date.now() + "_" + Math.floor(Math.random()*999);
             var nome_pg = bet.nome_pg || bet.userNick || "Utente";
             (function(av, nome, v, titolo) {
-              promises.push(db.ref("scommesse/avvisi/" + av).set({
-                id: av,
-                testo: nome + " ha vinto " + jenny(v) + " da \"" + titolo + "\"",
-                tipo: "vincita",
-                gestito: false,
-                createdAt: Date.now()
-              }));
+              /* recupera url_scheda dell'utente vincitore */
+              (function(av2, nome2, v2, titolo2, uid2) {
+                db.ref("scommesse/utenti/" + uid2 + "/url_scheda").once("value").then(function(snap3) {
+                  var url_sch = snap3.val() || null;
+                  return db.ref("scommesse/avvisi/" + av2).set({
+                    id: av2,
+                    nome_pg: nome2,
+                    url_scheda: url_sch,
+                    testo: nome2 + " ha vinto " + jenny(v2) + " da \"" + titolo2 + "\"",
+                    tipo: "vincita",
+                    gestito: false,
+                    createdAt: Date.now()
+                  });
+                });
+              })(av_id, nome_pg, vincita, sc.titolo, bet.userId);
             })(av_id, nome_pg, vincita, sc.titolo);
           }
         });
@@ -1473,6 +1470,15 @@
 
 
     /* ── avvisi staff ── */
+    function render_avviso_testo(av) {
+      if (!av.nome_pg || !av.url_scheda || !av.testo) return esc(av.testo || "");
+      /* sostituisce il nome con un link nella stringa testo */
+      var nome_esc = esc(av.nome_pg);
+      var testo_esc = esc(av.testo);
+      var link = '<a href="' + esc(av.url_scheda) + '" target="_blank" style="color:var(--accent);font-weight:700;text-decoration:underline">' + nome_esc + '</a>';
+      return testo_esc.replace(nome_esc, link);
+    }
+
     function render_avvisi() {
       var el = document.getElementById("tcb-avvisi-list");
       if (!el) return;
@@ -1490,7 +1496,7 @@
         html += '<div class="tcb-avviso-row' + (gestito ? " tcb-avviso-done" : "") + '">' +
           '<div class="tcb-avviso-icon"><i class="fas ' + tipo_icon + '" style="color:' + tipo_color + '"></i></div>' +
           '<div class="tcb-avviso-body">' +
-            '<div class="tcb-avviso-testo">' + esc(av.testo) + '</div>' +
+            '<div class="tcb-avviso-testo">' + render_avviso_testo(av) + '</div>' +
           '</div>' +
           '<div class="tcb-avviso-actions">' +
             (gestito
