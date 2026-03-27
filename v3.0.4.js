@@ -1475,7 +1475,7 @@
       /* sostituisce il nome con un link nella stringa testo */
       var nome_esc = esc(av.nome_pg);
       var testo_esc = esc(av.testo);
-      var link = '<a href="' + esc(av.url_scheda) + '" target="_blank" style="color:var(--accent);font-weight:700;text-decoration:underline">' + nome_esc + '</a>';
+      var link = '<a href="' + esc(av.url_scheda) + '" target="_blank">' + nome_esc + '</a>';
       return testo_esc.replace(nome_esc, link);
     }
 
