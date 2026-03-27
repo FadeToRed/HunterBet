@@ -1547,8 +1547,8 @@
     avvia_listeners();
     init_login();
     init_registrazione();
-    init_tabs();
     render();
+    init_tabs();
     if (state.utente) avvia_listener_utente(state.utente.uid);
   }
 })();
