@@ -633,7 +633,6 @@
               '<input class="tcb-input" id="tcb-m-imp" type="number" min="1" placeholder="0">' +
               '<span class="tcb-amount-sfx">Jenny</span>' +
             '</div>' +
-            '<div class="tcb-bal-row"><i class="fas fa-wallet"></i> Disponibile: <strong>' + jenny(state.utente.saldo) + '</strong></div>' +
             '<div id="tcb-m-prev" class="tcb-prev-row"></div>' +
             '<div id="tcb-m-err" class="tcb-field-err"></div>' +
           '</div>' +
@@ -677,10 +676,18 @@
       if (sel_idx < 0) { err.textContent = "Seleziona un combattente."; return; }
       var importo = parseInt(document.getElementById("tcb-m-imp").value, 10);
       if (!importo || importo < 1) { err.textContent = "Inserisci un importo valido."; return; }
+
+      /* FIX: verifica che l'utente non abbia già scommesso su questo incontro */
+      for (var sc_i=0; sc_i<state.scommesse_utente.length; sc_i++) {
+        if (state.scommesse_utente[sc_i].scontroId === scontro.id) {
+          err.textContent = "Hai già una scommessa su questo incontro.";
+          return;
+        }
+      }
+
       var btn = document.getElementById("tcb-m-ok");
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
 
-      /* Verifica saldo leggendo la scheda PG in tempo reale */
       var url_scheda = state.utente.url_scheda;
       if (!url_scheda) {
         err.textContent = "Scheda personaggio non collegata all'account.";
@@ -706,10 +713,12 @@
               }
             }
           }
+
+          /* FIX: usa Promise.reject per fermare la catena, non un semplice return */
           if (saldo_scheda < importo) {
-            if(document.getElementById("tcb-m-err")) document.getElementById("tcb-m-err").textContent = "Saldo insufficiente sulla scheda (" + jenny(saldo_scheda) + " disponibili).";
-            btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Conferma'; return;
+            return Promise.reject({ tipo: "saldo", msg: "Saldo insufficiente (" + jenny(saldo_scheda) + " disponibili)." });
           }
+
           var part = scontro.partecipanti[sel_idx];
           var sid = "sc_" + Date.now() + "_" + Math.floor(Math.random()*9999);
           var avviso_id = "av_" + Date.now();
@@ -729,9 +738,11 @@
               createdAt: Date.now()
             })
           ]);
-        }).then(function() { modal_close(); toast("Scommessa registrata.", "ok"); })
-        .catch(function() {
-          if(document.getElementById("tcb-m-err")) document.getElementById("tcb-m-err").textContent = "Errore nel verificare il saldo. Riprova.";
+        })
+        .then(function() { modal_close(); toast("Scommessa registrata.", "ok"); })
+        .catch(function(e) {
+          var msg_el = document.getElementById("tcb-m-err");
+          if (msg_el) msg_el.textContent = (e && e.msg) ? e.msg : "Errore nel verificare il saldo. Riprova.";
           btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Conferma';
         });
     }
