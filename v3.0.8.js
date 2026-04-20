@@ -637,7 +637,7 @@
         var prev = document.getElementById("tcb-m-prev");
         if (!prev) return;
         if (sel_idx >= 0 && imp > 0) {
-          prev.innerHTML = '<i class="fas fa-trophy"></i> Vincita potenziale: <strong>' + jenny(Math.floor(imp * scontro.partecipanti[sel_idx].quota)) + '</strong>';
+          prev.innerHTML = '<i class="fas fa-trophy"></i> Vincita potenziale: <strong>' + jenny(Math.floor(imp + (imp / 2) * (scontro.partecipanti[sel_idx].quota / 2))) + '</strong>';
           prev.style["display"] = "flex";
         } else { prev.style["display"] = "none"; }
       }
@@ -751,7 +751,7 @@
         var ec = s.stato==="vinta" ? "tcb-esito-win" : s.stato==="persa" ? "tcb-esito-loss" : "tcb-esito-wait";
         var ei = s.stato==="vinta" ? "fa-check-circle" : s.stato==="persa" ? "fa-times-circle" : "fa-clock";
         var el_lbl = s.stato==="vinta" ? "Vinta" : s.stato==="persa" ? "Persa" : "In attesa";
-        var pot = jenny(Math.floor(s.importo * s.quota));
+        var pot = jenny(Math.floor(s.importo + (s.importo / 2) * (s.quota / 2)));
         var pot_html = s.stato==="vinta" ? '<span class="tcb-win-amt">+ ' + pot + '</span>' : pot;
         html += '<tr><td class="tcb-td-match">' + esc(s.scontroTitolo) + '</td>' +
           '<td>' + esc(s.partecipante) + '</td><td>' + jenny(s.importo) + '</td>' +
@@ -1568,7 +1568,7 @@
           promises.push(db.ref("scommesse/scommesse/" + bet.id + "/stato").set(esito));
           if (esito === "vinta") {
             /* genera avviso vincita per lo staff */
-            var vincita = Math.floor(bet.importo * bet.quota);
+            var vincita = Math.floor(bet.importo + (bet.importo / 2) * (bet.quota / 2));
             var av_id = "av_" + Date.now() + "_" + Math.floor(Math.random()*999);
             var nome_pg = bet.nome_pg || bet.userNick || "Utente";
             (function(av, nome, v, titolo) {
