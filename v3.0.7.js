@@ -1194,22 +1194,42 @@
       tmp["inn"+"erHTML"] = html_text;
       var post = tmp["querySelector"](".color");
       if (!post) return null;
-      var spans = post["getElements"+"ByTagName"]("span");
+
+      /* ── Livello: dentro .dati-pg, span "Livello:" seguito dal valore ── */
       var livello = 0;
-      var stat_nomi = ["Forza", "Resistenza", "Velocit", "Riflessi", "Destrezza", "Mira"];
-      /* Velocità può essere "Velocità:" o "Velocita:" — usiamo indexOf */
-      var stats_sum = 0;
-      for (var i=0; i<spans.length-1; i++) {
-        if (spans[i].className !== "scheda-label") continue;
-        var label = spans[i].textContent.trim().replace(new RegExp(":", "g"), "").trim();
-        var val_el = spans[i+1];
-        if (!val_el || val_el.className !== "scheda-entry") continue;
-        var val = parseInt(val_el.textContent.trim(), 10) || 0;
-        if (label === "Livello") { livello = val; continue; }
-        for (var s=0; s<stat_nomi.length; s++) {
-          if (label.indexOf(stat_nomi[s]) === 0) { stats_sum += val; break; }
+      var dati_pg = post["querySelector"](".dati-pg");
+      if (dati_pg) {
+        var dati_spans = dati_pg["getElements"+"ByTagName"]("span");
+        for (var i=0; i<dati_spans.length-1; i++) {
+          if (dati_spans[i].textContent.trim() === "Livello:") {
+            livello = parseInt(dati_spans[i+1].textContent.trim(), 10) || 0;
+            break;
+          }
         }
       }
+
+      /* ── Stats: .stat-card dentro .stats-grid, solo label senza classe "over" ── */
+      var stat_nomi = ["Forza", "Resistenza", "Velocit", "Riflessi", "Destrezza", "Mira"];
+      var stats_sum = 0;
+      var stats_grid = post["querySelector"](".stats-grid");
+      if (stats_grid) {
+        var cards = stats_grid["getElements"+"ByTagName"]("div");
+        for (var j=0; j<cards.length; j++) {
+          if (cards[j].className !== "stat-card") continue;
+          var label_el = cards[j]["querySelector"](".stat-label");
+          var value_el = cards[j]["querySelector"](".stat-value");
+          if (!label_el || !value_el) continue;
+          /* .over è solo visivo, non esclude la stat — accettiamo sia "stat-label" che "stat-label over" */
+          var label_txt = label_el.textContent.trim();
+          for (var s=0; s<stat_nomi.length; s++) {
+            if (label_txt.indexOf(stat_nomi[s]) === 0) {
+              stats_sum += parseInt(value_el.textContent.trim(), 10) || 0;
+              break;
+            }
+          }
+        }
+      }
+
       return { livello: livello, stats: stats_sum };
     }
 
