@@ -70,6 +70,10 @@
        per rimuoverlo definitivamente (con conferma), cosi' si possono
        ripulire di tanto in tanto quelli gestiti da tempo. Gli avvisi
        non ancora gestiti non si possono rimuovere.
+     - show("tcb-main") ora ripristina display:flex invece di block:
+       serve al nuovo tetto di altezza a 700px (definito nell'HTML/CSS),
+       dove #tcb-main e' una colonna con la barra tab fissa e il
+       pannello attivo che scrolla al suo interno.
    ========================================================= */
 (function () {
   "use strict";
@@ -208,7 +212,10 @@
       var o = document.getElementById("tcb-modal-overlay");
       if (o) o.parentNode.removeChild(o);
     }
-    function show(id){ var e=document.getElementById(id); if(e) e.style["display"]="block"; }
+    /* #tcb-main deve tornare a "flex" (non "block"): il CSS lo usa come
+       colonna [nav fissa + pannello scrollabile] per il tetto di 700px.
+       Gli altri contenitori restano "block" come prima. */
+    function show(id){ var e=document.getElementById(id); if(e) e.style["display"]=(id==="tcb-main"?"flex":"block"); }
     function hide(id){ var e=document.getElementById(id); if(e) e.style["display"]="none"; }
 
     /* ── render root ── */
