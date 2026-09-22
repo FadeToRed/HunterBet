@@ -74,6 +74,13 @@
        serve al nuovo tetto di altezza a 700px (definito nell'HTML/CSS),
        dove #tcb-main e' una colonna con la barra tab fissa e il
        pannello attivo che scrolla al suo interno.
+     - Fix: da non loggati (o aprendo il login dall'header) l'app non
+       resta piu' visibile/cliccabile sotto la schermata di accesso.
+       show() ora rende login-wrap e main mutuamente esclusivi: mostrare
+       uno nasconde sempre l'altro. Prima il pulsante "Accedi"
+       dell'header mostrava il login senza nascondere l'app, lasciando
+       raggiungibili i pannelli con dati pubblici (vecchi incontri,
+       classifica).
    ========================================================= */
 (function () {
   "use strict";
@@ -214,8 +221,17 @@
     }
     /* #tcb-main deve tornare a "flex" (non "block"): il CSS lo usa come
        colonna [nav fissa + pannello scrollabile] per il tetto di 700px.
-       Gli altri contenitori restano "block" come prima. */
-    function show(id){ var e=document.getElementById(id); if(e) e.style["display"]=(id==="tcb-main"?"flex":"block"); }
+       Gli altri contenitori restano "block" come prima.
+       Inoltre login-wrap e main sono mutuamente esclusivi: mostrare l'uno
+       nasconde SEMPRE l'altro, cosi' da non-loggati (o con il login aperto
+       dall'header) l'app non resta visibile e cliccabile sotto la schermata
+       di accesso, dati pubblici inclusi (vecchi incontri, classifica). */
+    function show(id){
+      var e=document.getElementById(id); if(!e) return;
+      e.style["display"]=(id==="tcb-main"?"flex":"block");
+      if (id==="tcb-login-wrap") hide("tcb-main");
+      else if (id==="tcb-main") hide("tcb-login-wrap");
+    }
     function hide(id){ var e=document.getElementById(id); if(e) e.style["display"]="none"; }
 
     /* ── render root ── */
@@ -245,7 +261,7 @@
         document.getElementById("tcb-logout-btn").addEventListener("click", do_logout);
       } else {
         el.innerHTML = '<button class="tcb-btn tcb-btn-primary tcb-btn-sm" id="tcb-hdr-login-btn"><i class="fas fa-sign-in-alt"></i> Accedi</button>';
-        document.getElementById("tcb-hdr-login-btn").addEventListener("click", function(){ show("tcb-login-wrap"); });
+        document.getElementById("tcb-hdr-login-btn").addEventListener("click", function(){ show("tcb-login-wrap"); hide("tcb-main"); });
       }
     }
 
